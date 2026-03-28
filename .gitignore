@@ -1,0 +1,12 @@
+.DS_Store
+.elk-local/
+.env
+.env.local
+.idea/
+.vscode/
+bin/
+dist/
+node_modules/
+tmp/
+webui/dist/
+environments/
