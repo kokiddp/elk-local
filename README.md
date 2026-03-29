@@ -203,6 +203,10 @@ While a create request is running, the dashboard now keeps an explicit in-flight
 
 Generated WordPress stacks now keep the local URL and container runtime aligned: `wp-config.php` pins `WP_HOME` and `WP_SITEURL` to the local `127.0.0.1:<port>` address, Apache listens on that same port inside the container, and filesystem updates use the direct method instead of falling back to FTP for the default local setup.
 
+The Environments tab now uses a simple list-and-detail layout instead of a wall of cards. Selecting a stack opens a single detail pane with its state, runtime controls, links, and container inventory, and a destroyed environment can now be deleted from the dashboard once no containers are still reported.
+
+When Xdebug is enabled for a stack, ELK-Local now writes `.vscode/launch.json` into the app root with ready-to-run PHP debug listeners for ports `9003` and `9000`, so VS Code can attach without manual setup.
+
 Use `go run ./cmd/elk-local daemon status` to verify the control plane is up, `go run ./cmd/elk-local daemon stop` to shut it down, and `go run ./cmd/elk-local serve` only when you explicitly want a foreground/debug session.
 
 ## Testing

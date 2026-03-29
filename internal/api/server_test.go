@@ -341,6 +341,102 @@ func TestHandleEnvironmentActionRunsLifecycle(t *testing.T) {
 	}
 }
 
+func TestHandleDeleteEnvironmentRemovesManagedFiles(t *testing.T) {
+	userHome := isolateUserHome(t)
+	environmentsDir := filepath.Join(userHome, "elk-local", "environments")
+	configureInstalledDefaults(t, userHome, environmentsDir)
+
+	created, err := environment.Create(environment.CreateOptions{
+		Name:      "ui-delete-demo",
+		Preset:    "wordpress",
+		Installer: fakeApplicationInstaller{},
+	})
+	if err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+
+	backupMarker := filepath.Join(created.Manifest.Storage.BackupsPath, "backup.tar.gz")
+	if err := os.WriteFile(backupMarker, []byte("backup"), 0o644); err != nil {
+		t.Fatalf("write backup marker: %v", err)
+	}
+
+	executor := &fakeComposeExecutor{
+		outputByArgs: map[string]string{"ps --format json": "[]"},
+		errorByArgs:  map[string]error{},
+	}
+
+	server, err := NewServer(userHome, "", executor, fakeApplicationInstaller{})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodDelete, "/api/environments/ui-delete-demo", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d body=%s", response.Code, response.Body.String())
+	}
+
+	var payload deleteEnvironmentResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if payload.Name != "ui-delete-demo" {
+		t.Fatalf("unexpected deleted name: %s", payload.Name)
+	}
+
+	if !payload.RemovedProjectFiles || !payload.RemovedBackups {
+		t.Fatalf("unexpected delete payload: %+v", payload)
+	}
+
+	if _, err := os.Stat(created.Manifest.Storage.BasePath); !os.IsNotExist(err) {
+		t.Fatalf("expected storage path to be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(created.Manifest.Project.Root); !os.IsNotExist(err) {
+		t.Fatalf("expected project root to be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(created.Manifest.Storage.BackupsPath); !os.IsNotExist(err) {
+		t.Fatalf("expected backups path to be removed, stat err=%v", err)
+	}
+}
+
+func TestHandleDeleteEnvironmentRejectsActiveContainers(t *testing.T) {
+	isolateUserHome(t)
+
+	projectRoot := t.TempDir()
+	_, err := environment.Create(environment.CreateOptions{
+		Name:        "ui-delete-running-demo",
+		Preset:      "wordpress",
+		ProjectRoot: projectRoot,
+		Installer:   fakeApplicationInstaller{},
+	})
+	if err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+
+	executor := &fakeComposeExecutor{
+		outputByArgs: map[string]string{
+			"ps --format json": `[{"Name":"elk-ui-delete-running-demo-web","Service":"web","State":"running","Health":"","Publishers":[]}]`,
+		},
+		errorByArgs: map[string]error{},
+	}
+
+	server, err := NewServer(projectRoot, "", executor, fakeApplicationInstaller{})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodDelete, "/api/environments/ui-delete-running-demo", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("unexpected status code: %d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestHandleBackupsListsManagedArchives(t *testing.T) {
 	isolateUserHome(t)
 

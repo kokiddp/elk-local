@@ -65,6 +65,8 @@ When a change needs installed-path validation, do not stop at local source runs.
 - Keep daemon state loopback-only and store its file-backed runtime metadata under `.elk-local/daemon/`.
 - Keep dashboard create defaults aligned with the CLI. A blank create project root should resolve to the installed `environmentsDir/<name>` when installed config is present, while still honoring explicit overrides.
 - Keep dashboard progress and notice copy operational and terse. Long-running create requests should show an obvious in-flight state, and lifecycle success notices should summarize the outcome rather than dumping raw command output.
+- Keep the Environments tab operationally clear. Show state immediately in the list, open one detail pane at a time, and gate permanent delete behind a prior destroy so active containers are not removed by surprise.
+- Keep Xdebug onboarding zero-touch for VS Code users. When Xdebug is enabled, generate `.vscode/launch.json` in the app root with the managed listener configs, and remove only the ELK-managed entries when Xdebug is disabled so unrelated user launch configs survive.
 - Keep generated WordPress loopback behavior self-consistent. If ELK-Local advertises `127.0.0.1:<port>`, the Apache container and `wp-config.php` should agree on that same port, local file writes should not degrade to FTP, and any custom PHP entrypoint must preserve the base runtime command such as `apache2-foreground` or `php-fpm`.
 - Document significant architectural choices in `docs/adr/`.
 - Keep test workflow documentation current in `docs/testing.md`, and log project status in `docs/progress.md` plus `TODO.md` when priorities change.

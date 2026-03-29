@@ -366,6 +366,20 @@ func TestCreateCanEnableOptionalTooling(t *testing.T) {
 		t.Fatalf("unexpected xdebug ini: %s", string(xdebugINIContents))
 	}
 
+	launchContents, err := os.ReadFile(filepath.Join(projectRoot, ".vscode", "launch.json"))
+	if err != nil {
+		t.Fatalf("read VS Code launch config: %v", err)
+	}
+
+	launchText := string(launchContents)
+	if !strings.Contains(launchText, "Listen for Xdebug 3.0 (Local)") || !strings.Contains(launchText, "\"port\": 9003") {
+		t.Fatalf("expected VS Code launch config for Xdebug 3: %s", launchText)
+	}
+
+	if !strings.Contains(launchText, "Launch currently open script") {
+		t.Fatalf("expected VS Code launch config to include launch script entry: %s", launchText)
+	}
+
 	adminerIndexContents, err := os.ReadFile(filepath.Join(created.AdminerDirPath, "index.php"))
 	if err != nil {
 		t.Fatalf("read adminer index: %v", err)

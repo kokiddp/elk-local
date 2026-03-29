@@ -77,6 +77,12 @@ export interface EnvironmentResponse {
   output?: string
 }
 
+export interface DeleteEnvironmentResponse {
+  name: string
+  removedProjectFiles?: boolean
+  removedBackups?: boolean
+}
+
 export interface BackupView {
   fileName: string
   path: string
@@ -168,6 +174,12 @@ export function createEnvironment(payload: CreateEnvironmentPayload) {
 export function runEnvironmentAction(name: string, action: 'start' | 'stop' | 'destroy') {
   return request<EnvironmentResponse>(`/api/environments/${name}/actions/${action}`, {
     method: 'POST',
+  })
+}
+
+export function deleteEnvironment(name: string) {
+  return request<DeleteEnvironmentResponse>(`/api/environments/${name}`, {
+    method: 'DELETE',
   })
 }
 

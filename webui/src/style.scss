@@ -455,10 +455,60 @@ body {
   color: var(--elk-muted);
 }
 
-.environment-grid {
+.environment-browser {
   display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.25rem;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+}
+
+.environment-browser__list,
+.environment-browser__detail {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.environment-browser__list {
+  align-content: start;
+}
+
+.environment-browser__list-head {
+  padding: 0.9rem 1rem;
+  display: grid;
+  gap: 0.15rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(53, 33, 15, 0.08);
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.environment-list-item {
+  padding: 0.95rem 1rem;
+  display: grid;
+  gap: 0.3rem;
+  text-align: left;
+  border: 1px solid rgba(53, 33, 15, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--elk-ink);
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.environment-list-item:hover {
+  border-color: rgba(184, 96, 47, 0.34);
+  background: rgba(255, 250, 245, 0.96);
+  transform: translateY(-1px);
+}
+
+.environment-list-item--active {
+  border-color: rgba(184, 96, 47, 0.54);
+  background: linear-gradient(180deg, rgba(255, 250, 244, 0.98), rgba(255, 242, 232, 0.98));
+  box-shadow: 0 18px 34px rgba(125, 72, 39, 0.12);
+}
+
+.environment-list-item__head {
+  display: flex;
+  gap: 0.7rem;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .environment-card {
@@ -466,6 +516,15 @@ body {
   display: grid;
   gap: 1rem;
   background: linear-gradient(180deg, rgba(255, 252, 248, 0.96), rgba(255, 247, 239, 0.94));
+}
+
+.environment-state-panel {
+  padding: 0.8rem 0.95rem;
+  display: grid;
+  gap: 0.2rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(53, 33, 15, 0.08);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .environment-card__head,
@@ -611,7 +670,8 @@ body {
   .tab-grid--overview,
   .tab-grid--create,
   .tab-grid--backups,
-  .meta-grid {
+  .meta-grid,
+  .environment-browser {
     grid-template-columns: 1fr;
   }
 
@@ -623,6 +683,7 @@ body {
 @media (max-width: 991.98px) {
   .dashboard-header__content,
   .environment-card__head,
+  .environment-list-item__head,
   .preset-directory__item,
   .recent-item,
   .backup-item__main,

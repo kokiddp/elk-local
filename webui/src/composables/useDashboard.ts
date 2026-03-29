@@ -52,6 +52,17 @@ export function useDashboard(refreshIntervalMs = 5000) {
     }
   }
 
+  function removeEnvironment(name: string) {
+    if (!dashboard.value) {
+      return
+    }
+
+    dashboard.value = {
+      ...dashboard.value,
+      environments: dashboard.value.environments.filter((environment) => environment.name !== name),
+    }
+  }
+
   async function loadDashboard(options?: { silent?: boolean }) {
     if (options?.silent) {
       isRefreshing.value = true
@@ -98,6 +109,7 @@ export function useDashboard(refreshIntervalMs = 5000) {
     setFeedback,
     setError,
     replaceEnvironment,
+    removeEnvironment,
     loadDashboard,
   }
 }

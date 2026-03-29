@@ -137,6 +137,12 @@ type environmentResponse struct {
 	Output      string          `json:"output,omitempty"`
 }
 
+type deleteEnvironmentResponse struct {
+	Name                string `json:"name"`
+	RemovedProjectFiles bool   `json:"removedProjectFiles,omitempty"`
+	RemovedBackups      bool   `json:"removedBackups,omitempty"`
+}
+
 type backupInventoryResponse struct {
 	EnvironmentName string       `json:"environmentName"`
 	Backups         []BackupView `json:"backups"`
@@ -523,18 +529,41 @@ func (server *Server) handleEnvironment(writer http.ResponseWriter, request *htt
 	}
 
 	if len(parts) == 1 {
-		if request.Method != http.MethodGet {
-			writeMethodNotAllowed(writer, http.MethodGet)
-			return
-		}
+		switch request.Method {
+		case http.MethodGet:
+			environmentView, err := server.inspectManifest(manifest)
+			if err != nil {
+				writeError(writer, http.StatusInternalServerError, err)
+				return
+			}
 
-		environmentView, err := server.inspectManifest(manifest)
-		if err != nil {
-			writeError(writer, http.StatusInternalServerError, err)
-			return
-		}
+			writeJSON(writer, http.StatusOK, environmentResponse{Environment: environmentView})
+		case http.MethodDelete:
+			environmentView, err := server.inspectManifest(manifest)
+			if err != nil {
+				writeError(writer, http.StatusInternalServerError, err)
+				return
+			}
 
-		writeJSON(writer, http.StatusOK, environmentResponse{Environment: environmentView})
+			if len(environmentView.Status.Containers) > 0 {
+				writeError(writer, http.StatusConflict, fmt.Errorf("destroy %s before deleting it; %d container(s) are still present", manifest.Name, len(environmentView.Status.Containers)))
+				return
+			}
+
+			result, err := environment.Delete(server.projectRoot, manifest.Name)
+			if err != nil {
+				writeError(writer, http.StatusBadRequest, err)
+				return
+			}
+
+			writeJSON(writer, http.StatusOK, deleteEnvironmentResponse{
+				Name:                manifest.Name,
+				RemovedProjectFiles: result.RemovedProjectFiles,
+				RemovedBackups:      result.RemovedBackups,
+			})
+		default:
+			writeMethodNotAllowed(writer, http.MethodGet, http.MethodDelete)
+		}
 		return
 	}
 
@@ -984,7 +1013,7 @@ func withLocalCORS(next http.Handler) http.Handler {
 		if strings.HasPrefix(origin, "http://127.0.0.1:") || strings.HasPrefix(origin, "http://localhost:") {
 			writer.Header().Set("Access-Control-Allow-Origin", origin)
 			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			writer.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+			writer.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
 		}
 
 		if request.Method == http.MethodOptions {

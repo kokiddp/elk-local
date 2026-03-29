@@ -18,12 +18,29 @@ export function statusLabel(state: string) {
     case 'running':
       return 'Running'
     case 'partial':
-      return 'Partially running'
+      return 'Degraded'
     case 'stopped':
-      return 'Stopped'
+      return 'Offline'
     default:
       return 'Needs attention'
   }
+}
+
+export function environmentStateSummary(environment: EnvironmentView) {
+  const containerCount = environment.status.containers.length
+  if (environment.status.state === 'running') {
+    return containerCount > 0 ? `${containerCount} active container${containerCount === 1 ? '' : 's'}` : 'Ready to open'
+  }
+
+  if (environment.status.state === 'partial') {
+    return containerCount > 0 ? `${containerCount} container${containerCount === 1 ? '' : 's'} still reported` : 'Some services need attention'
+  }
+
+  if (environment.status.state === 'stopped') {
+    return 'No active containers'
+  }
+
+  return environment.status.error || 'Runtime inspection needs attention'
 }
 
 export function formatUpdatedAt(value: string) {

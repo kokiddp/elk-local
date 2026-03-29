@@ -155,6 +155,10 @@ func TestUpdateCanToggleOptionalTooling(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(updated.Manifest.Storage.BasePath, "php", "xdebug.ini")); !os.IsNotExist(err) {
 		t.Fatalf("expected xdebug.ini to be removed after disabling, stat error: %v", err)
 	}
+
+	if _, err := os.Stat(filepath.Join(projectRoot, ".vscode", "launch.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected VS Code launch config to be removed after disabling xdebug, stat error: %v", err)
+	}
 }
 
 func TestUpdateSyncsDatabaseCredentialsIntoApplicationConfig(t *testing.T) {

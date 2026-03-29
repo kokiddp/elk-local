@@ -30,6 +30,7 @@ const {
   setFeedback,
   setError,
   replaceEnvironment,
+  removeEnvironment,
   loadDashboard,
 } = useDashboard()
 
@@ -72,6 +73,10 @@ function handleNotify(payload: { type: 'success' | 'error'; message: string }) {
 
 function handleEnvironmentUpdated(environment: EnvironmentView) {
   replaceEnvironment(environment)
+}
+
+function handleEnvironmentRemoved(name: string) {
+  removeEnvironment(name)
 }
 
 function handleRefresh() {
@@ -122,6 +127,7 @@ function handleRefresh() {
         :environments="environments"
         :is-loading="isLoading"
         @environment-updated="handleEnvironmentUpdated"
+        @environment-removed="handleEnvironmentRemoved"
         @notify="handleNotify"
       />
 

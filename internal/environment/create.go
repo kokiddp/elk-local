@@ -273,6 +273,10 @@ func writeGeneratedArtifacts(manifest Manifest) (*CreatedEnvironment, error) {
 		return nil, fmt.Errorf("remove xdebug ini: %w", err)
 	}
 
+	if err := syncVSCodeLaunchConfig(manifest); err != nil {
+		return nil, err
+	}
+
 	appConfigPaths, err := syncApplicationConfig(manifest)
 	if err != nil {
 		return nil, err

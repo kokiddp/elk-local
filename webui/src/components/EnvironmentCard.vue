@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { runEnvironmentAction, type EnvironmentView } from '../api'
-import { formatUpdatedAt, statusLabel, statusTone, toolingSummary } from '../lib/display'
+import { computed, ref } from 'vue'
+import { deleteEnvironment, runEnvironmentAction, type EnvironmentView } from '../api'
+import { environmentStateSummary, formatUpdatedAt, statusLabel, statusTone, toolingSummary } from '../lib/display'
 
 const props = defineProps<{
   environment: EnvironmentView
@@ -9,10 +9,25 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'environment-updated': [environment: EnvironmentView]
+  'environment-removed': [name: string]
   notify: [payload: { type: 'success' | 'error'; message: string }]
 }>()
 
-const pendingAction = ref<'start' | 'stop' | 'destroy' | ''>('')
+const pendingAction = ref<'start' | 'stop' | 'destroy' | 'delete' | ''>('')
+const hasContainers = computed(() => props.environment.status.containers.length > 0)
+const canDelete = computed(() => props.environment.status.state === 'stopped' && !hasContainers.value)
+
+function isActionDisabled(action: 'start' | 'stop' | 'destroy') {
+  if (pendingAction.value) {
+    return true
+  }
+
+  if (action === 'start') {
+    return props.environment.status.state === 'running'
+  }
+
+  return !hasContainers.value
+}
 
 function successMessage(action: 'start' | 'stop' | 'destroy', environment: EnvironmentView) {
   switch (action) {
@@ -23,6 +38,18 @@ function successMessage(action: 'start' | 'stop' | 'destroy', environment: Envir
     case 'destroy':
       return `${environment.name} containers were removed.`
   }
+}
+
+function deleteMessage(name: string, removedProjectFiles?: boolean, removedBackups?: boolean) {
+  const fragments = ['registry entry removed']
+  if (removedProjectFiles) {
+    fragments.push('managed project files removed')
+  }
+  if (removedBackups) {
+    fragments.push('managed backups removed')
+  }
+
+  return `${name} was deleted: ${fragments.join(', ')}.`
 }
 
 async function handleAction(action: 'start' | 'stop' | 'destroy') {
@@ -44,6 +71,41 @@ async function handleAction(action: 'start' | 'stop' | 'destroy') {
     pendingAction.value = ''
   }
 }
+
+async function handleDelete() {
+  if (!canDelete.value) {
+    emit('notify', {
+      type: 'error',
+      message: `Destroy ${props.environment.name} before deleting it from the dashboard.`,
+    })
+    return
+  }
+
+  const confirmed = window.confirm(
+    `Delete ${props.environment.name}? Managed runtime files will be removed immediately. Managed project files are only removed when this environment lives in the default managed directory.`,
+  )
+  if (!confirmed) {
+    return
+  }
+
+  pendingAction.value = 'delete'
+
+  try {
+    const response = await deleteEnvironment(props.environment.name)
+    emit('environment-removed', response.name)
+    emit('notify', {
+      type: 'success',
+      message: deleteMessage(response.name, response.removedProjectFiles, response.removedBackups),
+    })
+  } catch (error) {
+    emit('notify', {
+      type: 'error',
+      message: error instanceof Error ? error.message : `Unable to delete ${props.environment.name}.`,
+    })
+  } finally {
+    pendingAction.value = ''
+  }
+}
 </script>
 
 <template>
@@ -60,21 +122,32 @@ async function handleAction(action: 'start' | 'stop' | 'destroy') {
         <p class="environment-subtitle mb-2">
           {{ environment.projectType }} • PHP {{ environment.phpVersion }} • {{ environment.webServer }} • {{ environment.database.engine }} {{ environment.database.version }}
         </p>
+        <div class="environment-state-panel mb-2">
+          <strong>{{ environmentStateSummary(environment) }}</strong>
+          <span class="micro-copy">{{ environment.status.error || 'Last updated ' + formatUpdatedAt(environment.updatedAt) }}</span>
+        </div>
         <p class="micro-copy mb-1">{{ environment.projectRoot }}</p>
-        <p class="micro-copy mb-0">Updated {{ formatUpdatedAt(environment.updatedAt) }}</p>
+        <p class="micro-copy mb-0">Manifest {{ environment.manifestPath }}</p>
       </div>
 
       <div class="action-stack">
-        <button type="button" class="btn btn-dark" :disabled="Boolean(pendingAction)" @click="handleAction('start')">
+        <button type="button" class="btn btn-dark" :disabled="isActionDisabled('start')" @click="handleAction('start')">
           {{ pendingAction === 'start' ? 'Starting…' : 'Start' }}
         </button>
-        <button type="button" class="btn btn-outline-dark" :disabled="Boolean(pendingAction)" @click="handleAction('stop')">
+        <button type="button" class="btn btn-outline-dark" :disabled="isActionDisabled('stop')" @click="handleAction('stop')">
           {{ pendingAction === 'stop' ? 'Stopping…' : 'Stop' }}
         </button>
-        <button type="button" class="btn btn-outline-danger" :disabled="Boolean(pendingAction)" @click="handleAction('destroy')">
+        <button type="button" class="btn btn-outline-danger" :disabled="isActionDisabled('destroy')" @click="handleAction('destroy')">
           {{ pendingAction === 'destroy' ? 'Destroying…' : 'Destroy' }}
         </button>
+        <button type="button" class="btn btn-danger" :disabled="Boolean(pendingAction) || !canDelete" @click="handleDelete">
+          {{ pendingAction === 'delete' ? 'Deleting…' : 'Delete' }}
+        </button>
       </div>
+    </div>
+
+    <div v-if="!canDelete" class="alert alert-secondary mb-0 py-2">
+      Delete becomes available after the environment is destroyed and no containers are still reported.
     </div>
 
     <div class="link-row mb-4">
