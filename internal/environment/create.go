@@ -43,13 +43,14 @@ type CreateOptions struct {
 }
 
 type CreatedEnvironment struct {
-	Manifest        Manifest
-	ManifestPath    string
-	ComposePath     string
-	NginxConfigPath string
-	AdminerDirPath  string
-	XdebugDirPath   string
-	AppConfigPaths  []string
+	Manifest              Manifest
+	ManifestPath          string
+	ComposePath           string
+	NginxConfigPath       string
+	ApacheVhostConfigPath string
+	AdminerDirPath        string
+	XdebugDirPath         string
+	AppConfigPaths        []string
 }
 
 func Create(options CreateOptions) (*CreatedEnvironment, error) {
@@ -230,6 +231,17 @@ func writeGeneratedArtifacts(manifest Manifest) (*CreatedEnvironment, error) {
 	phpEntrypointPath := filepath.Join(phpDir, "docker-entrypoint.sh")
 	if err := os.WriteFile(phpEntrypointPath, []byte(rendered.PHPEntrypoint), 0o755); err != nil {
 		return nil, fmt.Errorf("write PHP entrypoint: %w", err)
+	}
+
+	apacheVhostPath := filepath.Join(phpDir, "apache-site.conf")
+	if rendered.ApacheVhostConfig != "" {
+		if err := os.WriteFile(apacheVhostPath, []byte(rendered.ApacheVhostConfig), 0o644); err != nil {
+			return nil, fmt.Errorf("write apache vhost config: %w", err)
+		}
+
+		created.ApacheVhostConfigPath = apacheVhostPath
+	} else if err := os.Remove(apacheVhostPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("remove apache vhost config: %w", err)
 	}
 
 	if rendered.NginxConfig != "" {
@@ -479,6 +491,7 @@ type renderedArtifacts struct {
 	NginxConfig       string
 	PHPDockerfile     string
 	PHPEntrypoint     string
+	ApacheVhostConfig string
 	AdminerDockerfile string
 	AdminerIndexPHP   string
 	MailpitINI        string
@@ -527,6 +540,15 @@ func renderArtifacts(manifest Manifest) (renderedArtifacts, error) {
 	}
 
 	rendered := renderedArtifacts{Compose: composeContents, PHPDockerfile: phpDockerfileContents, PHPEntrypoint: phpEntrypointContents}
+
+	if manifest.Runtime.WebServer == "apache" {
+		apacheVhostContents, err := executeTemplate(apacheVhostConfigTemplate, templateData)
+		if err != nil {
+			return renderedArtifacts{}, fmt.Errorf("render apache vhost config: %w", err)
+		}
+
+		rendered.ApacheVhostConfig = apacheVhostContents
+	}
 
 	if nginxTemplateText != "" {
 		nginxContents, err := executeTemplate(nginxTemplateText, templateData)
@@ -859,6 +881,18 @@ volumes:
 		name: {{ .Manifest.Compose.NamePrefix }}-db-data
 `
 
+const apacheVhostConfigTemplate = `<VirtualHost *:80>
+	DocumentRoot {{ .DocumentRoot }}
+	<Directory {{ .DocumentRoot }}>
+		Options Indexes FollowSymLinks
+		AllowOverride All
+		Require all granted
+	</Directory>
+	ErrorLog ${APACHE_LOG_DIR}/error.log
+	CustomLog ${APACHE_LOG_DIR}/access.log combined
+</VirtualHost>
+`
+
 const defaultNginxConfig = `server {
 		listen 80;
 		server_name _;
@@ -927,6 +961,10 @@ COPY mailpit.ini /usr/local/etc/php/conf.d/zz-elk-mailpit.ini
 {{- if .Manifest.Tooling.Xdebug.Enabled }}
 COPY xdebug.ini /usr/local/etc/php/conf.d/zz-elk-xdebug.ini
 {{- end }}
+{{- if .UsesApache }}
+COPY apache-site.conf /etc/apache2/sites-available/000-default.conf
+RUN a2enmod rewrite
+{{- end }}
 `
 
 const mailpitINIConfigTemplate = `sendmail_path = "/usr/bin/msmtp --host=mailpit --port=1025 --tls=off --from=elk-local@localhost -t -i"
@@ -960,6 +998,14 @@ remap_www_data() {
 	chown -R www-data:www-data /var/run/apache2 /var/lock/apache2 /var/log/apache2 /var/run/php 2>/dev/null || true
 }
 
+fix_writable_dirs() {
+	if [[ "$(id -u)" -ne 0 ]]; then
+		return
+	fi
+
+	chown -R www-data:www-data /var/www/html 2>/dev/null || true
+}
+
 configure_apache_port() {
 	if [[ "$#" -eq 0 ]] || [[ "$1" != "apache2-foreground" ]]; then
 		return
@@ -976,6 +1022,7 @@ configure_apache_port() {
 
 main() {
 	remap_www_data
+	fix_writable_dirs
 	configure_apache_port "$@"
 	exec docker-php-entrypoint "$@"
 }

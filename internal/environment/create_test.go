@@ -112,6 +112,19 @@ func TestCreateWritesApacheEnvironmentArtifacts(t *testing.T) {
 		t.Fatalf("apache preset should not generate nginx config")
 	}
 
+	if created.ApacheVhostConfigPath == "" {
+		t.Fatal("apache preset should generate apache vhost config")
+	}
+
+	apacheVhostContents, err := os.ReadFile(created.ApacheVhostConfigPath)
+	if err != nil {
+		t.Fatalf("read apache vhost config: %v", err)
+	}
+
+	if !strings.Contains(string(apacheVhostContents), "AllowOverride All") {
+		t.Fatalf("apache vhost should have AllowOverride All: %s", string(apacheVhostContents))
+	}
+
 	configContents, err := os.ReadFile(filepath.Join(projectRoot, "wp-config.php"))
 	if err != nil {
 		t.Fatalf("read wp-config: %v", err)
@@ -242,6 +255,103 @@ func TestCreateUsesPublicDocumentRootForLaravel(t *testing.T) {
 	envText := string(envContents)
 	if !strings.Contains(envText, "DB_HOST=\"db\"") || !strings.Contains(envText, "DB_DATABASE=\"laravel_demo\"") {
 		t.Fatalf("laravel env was not synced: %s", envText)
+	}
+}
+
+func TestCreateApacheVhostForLaravelWithApache(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+
+	created, err := Create(CreateOptions{
+		Name:        "laravel-apache",
+		Preset:      "laravel",
+		WebServer:   "apache",
+		ProjectRoot: projectRoot,
+		Installer:   stubApplicationInstaller{},
+	})
+	if err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+
+	if created.ApacheVhostConfigPath == "" {
+		t.Fatal("expected apache vhost config to be generated for laravel+apache")
+	}
+
+	vhostContents, err := os.ReadFile(created.ApacheVhostConfigPath)
+	if err != nil {
+		t.Fatalf("read apache vhost config: %v", err)
+	}
+
+	vhost := string(vhostContents)
+	if !strings.Contains(vhost, "DocumentRoot /var/www/html/public") {
+		t.Fatalf("apache vhost should point to /public: %s", vhost)
+	}
+
+	if !strings.Contains(vhost, "AllowOverride All") {
+		t.Fatalf("apache vhost should have AllowOverride All: %s", vhost)
+	}
+
+	dockerfileContents, err := os.ReadFile(filepath.Join(filepath.Dir(created.ApacheVhostConfigPath), "Dockerfile"))
+	if err != nil {
+		t.Fatalf("read Dockerfile: %v", err)
+	}
+
+	dockerfile := string(dockerfileContents)
+	if !strings.Contains(dockerfile, "apache-site.conf /etc/apache2/sites-available/000-default.conf") {
+		t.Fatalf("Dockerfile should COPY apache-site.conf: %s", dockerfile)
+	}
+
+	if !strings.Contains(dockerfile, "a2enmod rewrite") {
+		t.Fatalf("Dockerfile should enable mod_rewrite: %s", dockerfile)
+	}
+}
+
+func TestCreateApacheVhostForWordPress(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+
+	created, err := Create(CreateOptions{
+		Name:        "wp-apache",
+		Preset:      "wordpress",
+		ProjectRoot: projectRoot,
+		Installer:   stubApplicationInstaller{},
+	})
+	if err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+
+	if created.ApacheVhostConfigPath == "" {
+		t.Fatal("wordpress+apache should generate an apache vhost config")
+	}
+
+	vhostContents, err := os.ReadFile(created.ApacheVhostConfigPath)
+	if err != nil {
+		t.Fatalf("read apache vhost config: %v", err)
+	}
+
+	vhost := string(vhostContents)
+	if !strings.Contains(vhost, "DocumentRoot /var/www/html") {
+		t.Fatalf("apache vhost should point to /var/www/html: %s", vhost)
+	}
+
+	if !strings.Contains(vhost, "AllowOverride All") {
+		t.Fatalf("apache vhost should have AllowOverride All: %s", vhost)
+	}
+
+	dockerfileContents, err := os.ReadFile(filepath.Join(filepath.Dir(created.ApacheVhostConfigPath), "Dockerfile"))
+	if err != nil {
+		t.Fatalf("read Dockerfile: %v", err)
+	}
+
+	dockerfile := string(dockerfileContents)
+	if !strings.Contains(dockerfile, "apache-site.conf /etc/apache2/sites-available/000-default.conf") {
+		t.Fatalf("Dockerfile should COPY apache-site.conf: %s", dockerfile)
+	}
+
+	if !strings.Contains(dockerfile, "a2enmod rewrite") {
+		t.Fatalf("Dockerfile should enable mod_rewrite: %s", dockerfile)
 	}
 }
 
