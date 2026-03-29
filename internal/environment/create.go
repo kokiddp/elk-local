@@ -215,6 +215,7 @@ func writeGeneratedArtifacts(manifest Manifest) (*CreatedEnvironment, error) {
 	phpDir := filepath.Join(manifest.Storage.BasePath, "php")
 	nginxDir := filepath.Join(manifest.Storage.BasePath, "nginx")
 	adminerDir := filepath.Join(manifest.Storage.BasePath, "adminer")
+	mailpitINIPath := filepath.Join(phpDir, "mailpit.ini")
 	xdebugINIPath := filepath.Join(phpDir, "xdebug.ini")
 
 	if err := os.MkdirAll(phpDir, 0o755); err != nil {
@@ -274,6 +275,14 @@ func writeGeneratedArtifacts(manifest Manifest) (*CreatedEnvironment, error) {
 		created.XdebugDirPath = phpDir
 	} else if err := os.Remove(xdebugINIPath); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("remove xdebug ini: %w", err)
+	}
+
+	if rendered.MailpitINI != "" {
+		if err := os.WriteFile(mailpitINIPath, []byte(rendered.MailpitINI), 0o644); err != nil {
+			return nil, fmt.Errorf("write mailpit ini: %w", err)
+		}
+	} else if err := os.Remove(mailpitINIPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("remove mailpit ini: %w", err)
 	}
 
 	if err := syncVSCodeLaunchConfig(manifest); err != nil {
@@ -472,6 +481,7 @@ type renderedArtifacts struct {
 	PHPEntrypoint     string
 	AdminerDockerfile string
 	AdminerIndexPHP   string
+	MailpitINI        string
 	XdebugINI         string
 }
 
@@ -534,6 +544,15 @@ func renderArtifacts(manifest Manifest) (renderedArtifacts, error) {
 		}
 
 		rendered.XdebugINI = xdebugINIContents
+	}
+
+	if manifest.Tooling.Mailpit.Enabled {
+		mailpitINIContents, err := executeTemplate(mailpitINIConfigTemplate, templateData)
+		if err != nil {
+			return renderedArtifacts{}, fmt.Errorf("render mailpit ini: %w", err)
+		}
+
+		rendered.MailpitINI = mailpitINIContents
 	}
 
 	if manifest.Tooling.Adminer.Enabled {
@@ -679,6 +698,14 @@ services:
 			{{- if .HostGID }}
 			ELK_HOST_GID: {{ printf "%q" .HostGID }}
 			{{- end }}
+			{{- if .Manifest.Tooling.Mailpit.Enabled }}
+			MAIL_MAILER: "smtp"
+			MAIL_HOST: "mailpit"
+			MAIL_PORT: "1025"
+			MAILER_DSN: "smtp://mailpit:1025"
+			SMTP_HOST: "mailpit"
+			SMTP_PORT: "1025"
+			{{- end }}
 			{{- if .Manifest.Tooling.Xdebug.Enabled }}
 			XDEBUG_MODE: {{ .Manifest.Tooling.Xdebug.Mode }}
 			XDEBUG_CONFIG: {{ printf "%q" .XdebugConfig }}
@@ -690,6 +717,9 @@ services:
 		container_name: {{ .Manifest.Compose.NamePrefix }}-web
 		depends_on:
 			- db
+			{{- if .Manifest.Tooling.Mailpit.Enabled }}
+			- mailpit
+			{{- end }}
 		ports:
 			- "{{ .Manifest.Network.HTTPPort }}:{{ .Manifest.Network.HTTPPort }}"
 		volumes:
@@ -744,13 +774,21 @@ services:
 			dockerfile: Dockerfile
 			args:
 				BASE_IMAGE: {{ .AppImage }}
-		{{- if or .HostUID .HostGID .Manifest.Tooling.Xdebug.Enabled }}
+		{{- if or .HostUID .HostGID .Manifest.Tooling.Mailpit.Enabled .Manifest.Tooling.Xdebug.Enabled }}
 		environment:
 			{{- if .HostUID }}
 			ELK_HOST_UID: {{ printf "%q" .HostUID }}
 			{{- end }}
 			{{- if .HostGID }}
 			ELK_HOST_GID: {{ printf "%q" .HostGID }}
+			{{- end }}
+			{{- if .Manifest.Tooling.Mailpit.Enabled }}
+			MAIL_MAILER: "smtp"
+			MAIL_HOST: "mailpit"
+			MAIL_PORT: "1025"
+			MAILER_DSN: "smtp://mailpit:1025"
+			SMTP_HOST: "mailpit"
+			SMTP_PORT: "1025"
 			{{- end }}
 			{{- if .Manifest.Tooling.Xdebug.Enabled }}
 			XDEBUG_MODE: {{ .Manifest.Tooling.Xdebug.Mode }}
@@ -760,6 +798,10 @@ services:
 		{{- if .Manifest.Tooling.Xdebug.Enabled }}
 		extra_hosts:
 			- "host.docker.internal:host-gateway"
+		{{- end }}
+		{{- if .Manifest.Tooling.Mailpit.Enabled }}
+		depends_on:
+			- mailpit
 		{{- end }}
 		container_name: {{ .Manifest.Compose.NamePrefix }}-app
 		working_dir: /var/www/html
@@ -847,6 +889,9 @@ RUN set -eux; \
 	apt-get install -y --no-install-recommends \
 		curl \
 		ghostscript \
+		{{- if .Manifest.Tooling.Mailpit.Enabled }}
+		msmtp \
+		{{- end }}
 		unzip \
 		zip; \
 	rm -rf /var/lib/apt/lists/*; \
@@ -876,9 +921,17 @@ RUN set -eux; \
 ENTRYPOINT ["elk-local-php-entrypoint"]
 CMD [{{ if .UsesApache }}"apache2-foreground"{{ else }}"php-fpm"{{ end }}]
 
+{{- if .Manifest.Tooling.Mailpit.Enabled }}
+COPY mailpit.ini /usr/local/etc/php/conf.d/zz-elk-mailpit.ini
+{{- end }}
 {{- if .Manifest.Tooling.Xdebug.Enabled }}
 COPY xdebug.ini /usr/local/etc/php/conf.d/zz-elk-xdebug.ini
 {{- end }}
+`
+
+const mailpitINIConfigTemplate = `sendmail_path = "/usr/bin/msmtp --host=mailpit --port=1025 --tls=off --from=elk-local@localhost -t -i"
+SMTP = mailpit
+smtp_port = 1025
 `
 
 const phpEntrypointTemplate = `#!/usr/bin/env bash

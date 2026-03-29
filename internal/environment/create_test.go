@@ -339,6 +339,14 @@ func TestCreateCanEnableOptionalTooling(t *testing.T) {
 		t.Fatalf("compose does not include mailpit: %s", composeText)
 	}
 
+	if !strings.Contains(composeText, "MAIL_HOST: \"mailpit\"") || !strings.Contains(composeText, "MAIL_PORT: \"1025\"") {
+		t.Fatalf("compose does not route app mail through mailpit: %s", composeText)
+	}
+
+	if !strings.Contains(composeText, "MAILER_DSN: \"smtp://mailpit:1025\"") {
+		t.Fatalf("compose does not expose a standard smtp dsn for mailpit: %s", composeText)
+	}
+
 	if !strings.Contains(composeText, "host.docker.internal:host-gateway") {
 		t.Fatalf("compose does not include xdebug host gateway: %s", composeText)
 	}
@@ -353,6 +361,10 @@ func TestCreateCanEnableOptionalTooling(t *testing.T) {
 		t.Fatalf("expected PHP Dockerfile to install imagick and xdebug: %s", phpDockerfileText)
 	}
 
+	if !strings.Contains(phpDockerfileText, "msmtp") || !strings.Contains(phpDockerfileText, "COPY mailpit.ini /usr/local/etc/php/conf.d/zz-elk-mailpit.ini") {
+		t.Fatalf("expected PHP Dockerfile to install and enable mailpit transport support: %s", phpDockerfileText)
+	}
+
 	if !strings.Contains(phpDockerfileText, "ENTRYPOINT [\"elk-local-php-entrypoint\"]") {
 		t.Fatalf("expected PHP Dockerfile to use the generated entrypoint: %s", phpDockerfileText)
 	}
@@ -364,6 +376,20 @@ func TestCreateCanEnableOptionalTooling(t *testing.T) {
 	xdebugINIContents, err := os.ReadFile(filepath.Join(created.XdebugDirPath, "xdebug.ini"))
 	if err != nil {
 		t.Fatalf("read xdebug ini: %v", err)
+	}
+
+	mailpitINIContents, err := os.ReadFile(filepath.Join(created.Manifest.Storage.BasePath, "php", "mailpit.ini"))
+	if err != nil {
+		t.Fatalf("read mailpit ini: %v", err)
+	}
+
+	mailpitINIText := string(mailpitINIContents)
+	if !strings.Contains(mailpitINIText, `sendmail_path = "/usr/bin/msmtp --host=mailpit --port=1025 --tls=off --from=elk-local@localhost -t -i"`) {
+		t.Fatalf("expected mailpit ini to route php mail through msmtp: %s", mailpitINIText)
+	}
+
+	if !strings.Contains(mailpitINIText, "SMTP = mailpit") || !strings.Contains(mailpitINIText, "smtp_port = 1025") {
+		t.Fatalf("expected mailpit ini to expose smtp defaults: %s", mailpitINIText)
 	}
 
 	xdebugPortText := strconv.Itoa(created.Manifest.Tooling.Xdebug.ClientPort)
