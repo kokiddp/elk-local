@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { deleteEnvironment, openEnvironmentInVSCode, runEnvironmentAction, type EnvironmentView } from '../api'
-import { environmentStateSummary, formatUpdatedAt, statusLabel, toolingSummary } from '../lib/display'
+import { deleteEnvironment, openEnvironmentFolder, openEnvironmentInVSCode, runEnvironmentAction, type EnvironmentView } from '../api'
+import { formatUpdatedAt } from '../lib/display'
 
-const props = defineProps<{
-  environment: EnvironmentView
-}>()
+const props = defineProps<{ environment: EnvironmentView }>()
 
 const emit = defineEmits<{
   'environment-updated': [environment: EnvironmentView]
@@ -13,376 +11,305 @@ const emit = defineEmits<{
   notify: [payload: { type: 'success' | 'error'; message: string }]
 }>()
 
-const pendingAction = ref<'start' | 'stop' | 'remove' | 'open-editor' | ''>('')
+const pendingAction = ref<'start' | 'stop' | 'remove' | 'open-editor' | 'open-folder' | ''>('')
 
 const hasContainers = computed(() => props.environment.status.containers.length > 0)
-const publishedPortCount = computed(() => {
-  return props.environment.status.containers.reduce((total, container) => total + (container.publishedPorts?.length ?? 0), 0)
+
+const badgeClass = computed(() => {
+  const s = props.environment.status.state
+  if (s === 'running') return 'badge--running'
+  if (s === 'partial') return 'badge--partial'
+  if (s === 'stopped') return 'badge--stopped'
+  return 'badge--unknown'
 })
 
-const serviceCards = computed(() => {
-  return [
-    {
-      label: 'Application',
-      title: props.environment.urls.app ? 'Open application' : 'No public app URL',
-      meta: props.environment.urls.app ?? `${props.environment.projectType} stack`,
-      href: props.environment.urls.app,
-      accent: true,
-    },
-    {
-      label: 'Adminer',
-      title: props.environment.tooling.adminer.enabled ? 'Database UI ready' : 'Adminer disabled',
-      meta:
-        props.environment.urls.adminer ??
-        (props.environment.tooling.adminer.enabled ? `Port ${props.environment.tooling.adminer.port ?? 'pending'}` : 'Enable it when you need DB inspection'),
-      href: props.environment.urls.adminer,
-      accent: false,
-    },
-    {
-      label: 'Mailpit',
-      title: props.environment.tooling.mailpit.enabled ? 'Inbox and SMTP capture' : 'Mailpit disabled',
-      meta:
-        props.environment.urls.mailpit ??
-        (props.environment.tooling.mailpit.enabled
-          ? `HTTP ${props.environment.tooling.mailpit.port ?? 'pending'} • SMTP ${props.environment.tooling.mailpit.smtpPort ?? 'pending'}`
-          : 'Useful when validating app mail flows'),
-      href: props.environment.urls.mailpit,
-      accent: false,
-    },
-    {
-      label: 'Database',
-      title: props.environment.database.name,
-      meta: props.environment.urls.database ?? `${props.environment.database.user}@127.0.0.1:${props.environment.network.databasePort}`,
-      href: undefined,
-      accent: false,
-    },
-  ]
+const badgeLabel = computed(() => {
+  const s = props.environment.status.state
+  if (s === 'running') return 'Running'
+  if (s === 'partial') return 'Degraded'
+  if (s === 'stopped') return 'Offline'
+  return 'Attention'
 })
 
-const pathRows = computed(() => {
-  return [
-    { label: 'Project root', value: props.environment.projectRoot },
-    { label: 'Runtime storage', value: props.environment.storagePath },
-    { label: 'Compose file', value: props.environment.composePath },
-    { label: 'Manifest', value: props.environment.manifestPath },
-  ]
+const dotClass = computed(() => {
+  const s = props.environment.status.state
+  if (s === 'running') return 'dot--running'
+  if (s === 'partial') return 'dot--partial'
+  if (s === 'stopped') return 'dot--stopped'
+  return 'dot--unknown'
 })
 
-const xdebugSummary = computed(() => {
-  if (!props.environment.tooling.xdebug.enabled) {
-    return 'Disabled for this stack'
-  }
-
-  return `Listen with the managed VS Code config on ${props.environment.tooling.xdebug.clientPort}.`
-})
-
-function environmentTone(state: string) {
-  switch (state) {
-    case 'running':
-      return 'running'
-    case 'partial':
-      return 'partial'
-    case 'stopped':
-      return 'stopped'
-    default:
-      return 'unknown'
-  }
+function containerDot(c: EnvironmentView['status']['containers'][number]) {
+  if (c.health === 'healthy' || (c.state === 'running' && !c.health)) return 'dot--running'
+  if (c.state === 'exited' || c.state === 'dead') return 'dot--stopped'
+  return 'dot--unknown'
 }
 
-function containerTone(container: EnvironmentView['status']['containers'][number]) {
-  if (container.health === 'healthy' || (container.state === 'running' && !container.health)) {
-    return 'healthy'
-  }
-
-  if (container.state === 'exited' || container.state === 'dead') {
-    return 'stopped'
-  }
-
-  return 'attention'
+function isStartDisabled() {
+  return Boolean(pendingAction.value) || props.environment.status.state === 'running'
 }
 
-function containerLabel(container: EnvironmentView['status']['containers'][number]) {
-  return container.health || container.state
-}
-
-function isActionDisabled(action: 'start' | 'stop') {
-  if (pendingAction.value) {
-    return true
-  }
-
-  if (action === 'start') {
-    return props.environment.status.state === 'running'
-  }
-
-  return !hasContainers.value
-}
-
-function successMessage(action: 'start' | 'stop', environment: EnvironmentView) {
-  switch (action) {
-    case 'start':
-      return `${environment.name} is running. Open the app link when the container status looks healthy.`
-    case 'stop':
-      return `${environment.name} is stopped.`
-  }
-}
-
-function deleteMessage(name: string, removedProjectFiles?: boolean, removedBackups?: boolean) {
-  const fragments = ['registry entry removed']
-  if (removedProjectFiles) {
-    fragments.push('managed project files removed')
-  }
-  if (removedBackups) {
-    fragments.push('managed backups removed')
-  }
-
-  return `${name} was deleted: ${fragments.join(', ')}.`
+function isStopDisabled() {
+  return Boolean(pendingAction.value) || !hasContainers.value
 }
 
 async function handleAction(action: 'start' | 'stop') {
   pendingAction.value = action
-
   try {
-    const response = await runEnvironmentAction(props.environment.name, action)
-    emit('environment-updated', response.environment)
-    emit('notify', {
-      type: 'success',
-      message: successMessage(action, response.environment),
+    const res = await runEnvironmentAction(props.environment.name, action)
+    emit('environment-updated', res.environment)
+    emit('notify', { type: 'success', message: action === 'start'
+      ? `${res.environment.name} started.`
+      : `${res.environment.name} stopped.`
     })
-  } catch (error) {
-    emit('notify', {
-      type: 'error',
-      message: error instanceof Error ? error.message : `Unable to ${action} ${props.environment.name}.`,
-    })
-  } finally {
-    pendingAction.value = ''
-  }
+  } catch (e) {
+    emit('notify', { type: 'error', message: e instanceof Error ? e.message : `Unable to ${action}.` })
+  } finally { pendingAction.value = '' }
 }
 
 async function handleRemove() {
-  const confirmed = window.confirm(
-    `Remove ${props.environment.name}? Running containers will be stopped and removed, then all environment files will be deleted. Managed project files are only removed when this environment lives in the default managed directory.`,
-  )
-  if (!confirmed) {
-    return
-  }
-
+  const ok = window.confirm(`Remove ${props.environment.name}? All containers and environment files will be deleted.`)
+  if (!ok) return
   pendingAction.value = 'remove'
-
   try {
-    const response = await deleteEnvironment(props.environment.name)
-    emit('environment-removed', response.name)
-    emit('notify', {
-      type: 'success',
-      message: deleteMessage(response.name, response.removedProjectFiles, response.removedBackups),
-    })
-  } catch (error) {
-    emit('notify', {
-      type: 'error',
-      message: error instanceof Error ? error.message : `Unable to remove ${props.environment.name}.`,
-    })
-  } finally {
-    pendingAction.value = ''
-  }
+    const res = await deleteEnvironment(props.environment.name)
+    emit('environment-removed', res.name)
+    emit('notify', { type: 'success', message: `${res.name} removed.` })
+  } catch (e) {
+    emit('notify', { type: 'error', message: e instanceof Error ? e.message : 'Unable to remove.' })
+  } finally { pendingAction.value = '' }
 }
 
-async function handleOpenInVSCode() {
+async function handleOpenVSCode() {
   pendingAction.value = 'open-editor'
-
   try {
-    const response = await openEnvironmentInVSCode(props.environment.name)
-    emit('environment-updated', response.environment)
-    emit('notify', {
-      type: 'success',
-      message: response.output || `${props.environment.name} opened in VS Code.`,
-    })
-  } catch (error) {
-    emit('notify', {
-      type: 'error',
-      message: error instanceof Error ? error.message : `Unable to open ${props.environment.name} in VS Code.`,
-    })
-  } finally {
-    pendingAction.value = ''
-  }
+    const res = await openEnvironmentInVSCode(props.environment.name)
+    emit('environment-updated', res.environment)
+    emit('notify', { type: 'success', message: res.output || `${props.environment.name} opened in VS Code.` })
+  } catch (e) {
+    emit('notify', { type: 'error', message: e instanceof Error ? e.message : 'Unable to open in VS Code.' })
+  } finally { pendingAction.value = '' }
+}
+
+async function handleOpenFolder() {
+  pendingAction.value = 'open-folder'
+  try {
+    const res = await openEnvironmentFolder(props.environment.name)
+    emit('environment-updated', res.environment)
+    emit('notify', { type: 'success', message: res.output || `${props.environment.name} folder opened.` })
+  } catch (e) {
+    emit('notify', { type: 'error', message: e instanceof Error ? e.message : 'Unable to open folder.' })
+  } finally { pendingAction.value = '' }
 }
 </script>
 
 <template>
-  <article class="environment-card surface-panel">
-    <div class="environment-card__hero">
-      <div class="environment-card__mast">
-        <div class="environment-card__title-row">
-          <h3 class="h4 mb-0">{{ environment.name }}</h3>
-          <span class="environment-status-pill" :class="`environment-status-pill--${environmentTone(environment.status.state)}`">
-            {{ statusLabel(environment.status.state) }}
-          </span>
-          <span class="stack-chip">{{ environment.preset }}</span>
-          <span v-if="environment.application?.name" class="stack-chip stack-chip--soft">
-            {{ environment.application.name }}{{ environment.application.version ? ` ${environment.application.version}` : '' }}
-          </span>
-        </div>
+  <div class="flex-col gap-8">
+    <!-- Header card -->
+    <div class="card">
+      <div class="card__header">
+        <span class="dot" :class="dotClass"/>
+        <span style="font-size:13px; font-weight:600">{{ environment.name }}</span>
+        <span class="badge" :class="badgeClass">{{ badgeLabel }}</span>
+        <span class="badge badge--blue" style="text-transform:none; letter-spacing:0">{{ environment.preset }}</span>
+        <span v-if="environment.application?.name" class="badge badge--accent" style="text-transform:none; letter-spacing:0">
+          {{ environment.application.name }}{{ environment.application.version ? ` ${environment.application.version}` : '' }}
+        </span>
+        <div class="card__header-spacer"/>
+        <span class="text-xs text-muted">{{ formatUpdatedAt(environment.updatedAt) }}</span>
 
-        <p class="environment-subtitle mb-0">
-          {{ environment.projectType }} • PHP {{ environment.phpVersion }} • {{ environment.webServer }} • {{ environment.database.engine }} {{ environment.database.version }}
-        </p>
+        <!-- Action buttons -->
+        <button
+          type="button"
+          class="icon-btn icon-btn--green"
+          :disabled="isStartDisabled()"
+          data-tooltip="Start"
+          @click="handleAction('start')"
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor"><polygon points="4,2 14,8 4,14"/></svg>
+        </button>
+        <button
+          type="button"
+          class="icon-btn"
+          :disabled="isStopDisabled()"
+          data-tooltip="Stop"
+          @click="handleAction('stop')"
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
+        </button>
+        <!-- VS Code icon -->
+        <button
+          type="button"
+          class="icon-btn icon-btn--accent"
+          :disabled="Boolean(pendingAction)"
+          data-tooltip="Open in VS Code"
+          @click="handleOpenVSCode"
+        >
+          <svg viewBox="0 0 100 100" fill="currentColor">
+            <path d="M74.1 4.3 51.6 27.5 32.5 11.2 24 16v68l8.5 4.8 19.1-16.3 22.5 23.2L100 88.6V11.4Zm0 72.2L56 60l18.1-20Z"/>
+            <path d="m24 16-8.5 4.8v58.4L24 84z" opacity=".4"/>
+          </svg>
+        </button>
+        <!-- Open project folder -->
+        <button
+          type="button"
+          class="icon-btn"
+          :disabled="Boolean(pendingAction)"
+          data-tooltip="Open project folder"
+          @click="handleOpenFolder"
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M2 4h4l1 2h7v8H2V4z"/>
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="icon-btn icon-btn--red"
+          :disabled="Boolean(pendingAction)"
+          data-tooltip="Remove environment"
+          @click="handleRemove"
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <polyline points="3,5 4,14 12,14 13,5"/>
+            <line x1="2" y1="5" x2="14" y2="5"/>
+            <line x1="6" y1="5" x2="6" y2="3"/>
+            <line x1="10" y1="5" x2="10" y2="3"/>
+            <line x1="6" y1="3" x2="10" y2="3"/>
+          </svg>
+        </button>
 
-        <div class="environment-state-panel">
-          <strong>{{ environmentStateSummary(environment) }}</strong>
-          <span class="micro-copy">
-            {{ hasContainers ? `${environment.status.containers.length} container${environment.status.containers.length === 1 ? '' : 's'} currently reported.` : 'Compose status is currently idle.' }}
-          </span>
-        </div>
-
-        <div class="link-row">
-          <span class="quick-link quick-link--muted">Updated {{ formatUpdatedAt(environment.updatedAt) }}</span>
-          <span class="quick-link quick-link--muted">Tooling {{ toolingSummary(environment) }}</span>
-        </div>
+        <!-- Pending spinner -->
+        <div v-if="pendingAction" class="progress-panel__spinner" style="margin-left:4px"/>
       </div>
 
-      <div class="environment-card__actions">
-        <div class="action-cluster">
-          <button type="button" class="btn btn-outline-secondary" :disabled="Boolean(pendingAction)" @click="handleOpenInVSCode">
-            {{ pendingAction === 'open-editor' ? 'Opening…' : 'Open in VS Code' }}
-          </button>
-          <button type="button" class="btn btn-dark" :disabled="isActionDisabled('start')" @click="handleAction('start')">
-            {{ pendingAction === 'start' ? 'Starting…' : 'Start' }}
-          </button>
-          <button type="button" class="btn btn-outline-dark" :disabled="isActionDisabled('stop')" @click="handleAction('stop')">
-            {{ pendingAction === 'stop' ? 'Stopping…' : 'Stop' }}
-          </button>
-        </div>
-
-        <div class="action-cluster action-cluster--danger">
-          <button type="button" class="btn btn-danger" :disabled="Boolean(pendingAction)" @click="handleRemove">
-            {{ pendingAction === 'remove' ? 'Removing…' : 'Remove' }}
-          </button>
-        </div>
-
-        <p class="micro-copy environment-card__hint mb-0">
-          Remove stops and deletes all containers and environment files. Open in VS Code targets the project root shown below.
-        </p>
+      <!-- Stack info row -->
+      <div class="card__body flex items-center gap-6" style="padding-top:8px; padding-bottom:8px; flex-wrap:wrap">
+        <span class="preset-pill">{{ environment.projectType }}</span>
+        <span class="preset-pill">PHP {{ environment.phpVersion }}</span>
+        <span class="preset-pill">{{ environment.webServer }}</span>
+        <span class="preset-pill">{{ environment.database.engine }} {{ environment.database.version }}</span>
+        <span v-if="environment.tooling.adminer.enabled" class="preset-pill">Adminer</span>
+        <span v-if="environment.tooling.mailpit.enabled" class="preset-pill">Mailpit</span>
+        <span v-if="environment.tooling.xdebug.enabled" class="preset-pill">Xdebug</span>
       </div>
     </div>
 
-    <div class="service-grid">
-      <component
-        :is="service.href ? 'a' : 'article'"
-        v-for="service in serviceCards"
-        :key="service.label"
-        class="service-card"
-        :class="{
-          'service-card--interactive': service.href,
-          'service-card--accent': service.accent,
-          'service-card--muted': !service.href && service.label !== 'Database',
-        }"
-        v-bind="service.href ? { href: service.href, target: '_blank', rel: 'noreferrer' } : {}"
+    <!-- Service tiles -->
+    <div class="service-tiles">
+      <a
+        v-if="environment.urls.app"
+        :href="environment.urls.app"
+        target="_blank"
+        rel="noreferrer"
+        class="service-tile service-tile--active"
       >
-        <span class="service-card__eyebrow">{{ service.label }}</span>
-        <strong>{{ service.title }}</strong>
-        <small>{{ service.meta }}</small>
-      </component>
+        <span class="service-tile__label">App</span>
+        <span class="service-tile__url">{{ environment.urls.app }}</span>
+        <span class="service-tile__meta">HTTP :{{ environment.network.httpPort }}</span>
+      </a>
+      <div v-else class="service-tile service-tile--disabled">
+        <span class="service-tile__label">App</span>
+        <span class="service-tile__meta">:{{ environment.network.httpPort }} · not running</span>
+      </div>
+
+      <a
+        v-if="environment.urls.adminer"
+        :href="environment.urls.adminer"
+        target="_blank"
+        rel="noreferrer"
+        class="service-tile"
+      >
+        <span class="service-tile__label">Adminer</span>
+        <span class="service-tile__url">{{ environment.urls.adminer }}</span>
+      </a>
+      <div v-else-if="environment.tooling.adminer.enabled" class="service-tile service-tile--disabled">
+        <span class="service-tile__label">Adminer</span>
+        <span class="service-tile__meta">:{{ environment.tooling.adminer.port ?? '—' }} · not running</span>
+      </div>
+
+      <a
+        v-if="environment.urls.mailpit"
+        :href="environment.urls.mailpit"
+        target="_blank"
+        rel="noreferrer"
+        class="service-tile"
+      >
+        <span class="service-tile__label">Mailpit</span>
+        <span class="service-tile__url">{{ environment.urls.mailpit }}</span>
+      </a>
+      <div v-else-if="environment.tooling.mailpit.enabled" class="service-tile service-tile--disabled">
+        <span class="service-tile__label">Mailpit</span>
+        <span class="service-tile__meta">not running</span>
+      </div>
+
+      <div class="service-tile">
+        <span class="service-tile__label">Database</span>
+        <span class="service-tile__meta">{{ environment.database.engine }} · {{ environment.database.name }}</span>
+        <span class="service-tile__meta">:{{ environment.network.databasePort }}</span>
+      </div>
     </div>
 
-    <section class="detail-section">
-      <div class="section-row mb-3">
-        <h4 class="h6 text-uppercase tracking mb-0">Runtime posture</h4>
-        <span class="micro-copy">{{ publishedPortCount }} published port{{ publishedPortCount === 1 ? '' : 's' }}</span>
-      </div>
-
-      <div class="meta-grid meta-grid--environment">
-        <article class="detail-block detail-block--accent">
-          <span>Stack</span>
-          <strong>{{ environment.projectType }}</strong>
-          <small>{{ environment.webServer }} • PHP {{ environment.phpVersion }}</small>
-        </article>
-
-        <article class="detail-block">
-          <span>Database</span>
-          <strong>{{ environment.database.name }}</strong>
-          <small>{{ environment.database.user }}@{{ environment.database.host }} • host port {{ environment.network.databasePort }}</small>
-        </article>
-
-        <article class="detail-block">
-          <span>HTTP</span>
-          <strong>{{ environment.network.httpPort }}</strong>
-          <small>{{ environment.urls.app ?? 'Open through the application card' }}</small>
-        </article>
-
-        <article class="detail-block">
-          <span>Optional tooling</span>
-          <strong>{{ toolingSummary(environment) }}</strong>
-          <small>{{ xdebugSummary }}</small>
-        </article>
-
-        <article class="detail-block">
-          <span>Containers</span>
-          <strong>{{ environment.status.containers.length }}</strong>
-          <small>{{ hasContainers ? 'Reported by docker compose status' : 'No active containers currently reported' }}</small>
-        </article>
-      </div>
-    </section>
-
-    <div v-if="environment.status.error" class="alert alert-warning mb-0 py-2">
+    <!-- Error alert -->
+    <div v-if="environment.status.error" class="toast toast--error" style="position:static; pointer-events:auto">
       {{ environment.status.error }}
     </div>
 
-    <div class="detail-columns">
-      <section class="detail-section">
-        <div class="section-row mb-3">
-          <h4 class="h6 text-uppercase tracking mb-0">Paths</h4>
-          <span class="micro-copy">Project and runtime files</span>
+    <!-- Paths + Containers in two columns -->
+    <div class="flex gap-8" style="align-items:start">
+      <!-- Paths -->
+      <div class="card flex-1">
+        <div class="card__header">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M2 4h4l1 2h7v8H2V4z"/>
+          </svg>
+          Paths
         </div>
-
-        <div class="path-list">
-          <div v-for="row in pathRows" :key="row.label" class="path-row">
-            <span>{{ row.label }}</span>
-            <strong class="path-row__value">{{ row.value }}</strong>
+        <div class="card__body flex-col gap-0">
+          <div class="detail-row">
+            <span class="detail-row__label">Project root</span>
+            <span class="detail-row__value">{{ environment.projectRoot }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">Storage</span>
+            <span class="detail-row__value">{{ environment.storagePath }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">Compose</span>
+            <span class="detail-row__value">{{ environment.composePath }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">DB host port</span>
+            <span class="detail-row__value">{{ environment.network.databasePort }}</span>
           </div>
         </div>
-      </section>
+      </div>
 
-      <section class="detail-section">
-        <div class="section-row mb-3">
-          <h4 class="h6 text-uppercase tracking mb-0">Containers</h4>
-          <span class="micro-copy">{{ environment.status.containers.length }} reported</span>
+      <!-- Containers -->
+      <div class="card" style="width:260px; flex-shrink:0">
+        <div class="card__header">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="1" y="4" width="14" height="10" rx="1"/>
+            <path d="M4 4V2h8v2"/>
+          </svg>
+          Containers
+          <span class="badge" :class="hasContainers ? 'badge--running' : 'badge--stopped'">
+            {{ environment.status.containers.length }}
+          </span>
         </div>
-
-        <div v-if="!hasContainers" class="empty-inline">
-          No active containers reported by docker compose.
+        <div class="card__body flex-col gap-0">
+          <div v-if="!hasContainers" class="empty-state" style="padding:12px">Idle</div>
+          <div
+            v-for="c in environment.status.containers"
+            :key="c.name"
+            class="container-row"
+          >
+            <span class="dot" :class="containerDot(c)"/>
+            <span class="container-row__name">{{ c.service }}</span>
+            <span class="container-row__service">{{ c.state }}</span>
+            <span v-for="p in (c.publishedPorts ?? [])" :key="p" class="port-chip">{{ p }}</span>
+          </div>
         </div>
-
-        <div v-else class="container-card-grid">
-          <article v-for="container in environment.status.containers" :key="container.name" class="container-card">
-            <div class="container-card__header">
-              <div>
-                <strong>{{ container.service }}</strong>
-                <div class="micro-copy">{{ container.name }}</div>
-              </div>
-
-              <span class="container-pill" :class="`container-pill--${containerTone(container)}`">
-                {{ containerLabel(container) }}
-              </span>
-            </div>
-
-            <div class="micro-copy">State {{ container.state }}</div>
-
-            <div v-if="container.publishedPorts?.length" class="container-port-list">
-              <span v-for="publishedPort in container.publishedPorts" :key="publishedPort" class="port-chip">
-                {{ publishedPort }}
-              </span>
-            </div>
-
-            <div v-else class="micro-copy">No published ports</div>
-          </article>
-        </div>
-      </section>
+      </div>
     </div>
-
-    <div class="link-row">
-      <span class="quick-link quick-link--muted">DB {{ environment.urls.database ?? `${environment.database.user}@127.0.0.1:${environment.network.databasePort}` }}</span>
-      <span v-if="environment.urls.smtp" class="quick-link quick-link--muted">SMTP {{ environment.urls.smtp }}</span>
-      <a v-if="environment.urls.app" class="quick-link" :href="environment.urls.app" target="_blank" rel="noreferrer">Open app</a>
-      <a v-if="environment.urls.adminer" class="quick-link" :href="environment.urls.adminer" target="_blank" rel="noreferrer">Adminer</a>
-      <a v-if="environment.urls.mailpit" class="quick-link" :href="environment.urls.mailpit" target="_blank" rel="noreferrer">Mailpit</a>
-    </div>
-  </article>
+  </div>
 </template>

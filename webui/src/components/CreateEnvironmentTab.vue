@@ -15,23 +15,7 @@ const emit = defineEmits<{
 
 const isCreating = ref(false)
 
-const createProgressTitle = computed(() => {
-  const environmentName = createForm.name.trim() || 'your environment'
-  return `Creating ${environmentName}`
-})
-
-const createProgressSteps = computed(() => {
-  const projectRoot = defaultProjectRootPreview.value
-  const applicationName = selectedPreset.value?.applicationName || 'the application'
-
-  return [
-    'Writing the manifest and Compose files for this stack.',
-    'Preparing or starting the required containers. First-run image pulls can take a while.',
-    `Installing ${applicationName} into ${projectRoot} and syncing config files.`,
-  ]
-})
-
-const createForm = reactive<CreateEnvironmentPayload>({
+const form = reactive<CreateEnvironmentPayload>({
   name: '',
   preset: 'wordpress',
   applicationVersion: '',
@@ -50,271 +34,212 @@ const createForm = reactive<CreateEnvironmentPayload>({
   force: false,
 })
 
-const selectedPreset = computed(() => props.presets.find((preset) => preset.name === createForm.preset) ?? null)
+const selectedPreset = computed(() => props.presets.find(p => p.name === form.preset) ?? null)
 
-const defaultProjectRootPreview = computed(() => {
-  const explicitProjectRoot = createForm.projectRoot.trim()
-  if (explicitProjectRoot) {
-    return explicitProjectRoot
-  }
-
-  const basePath = props.defaultProjectRootBase.trim()
-  if (!basePath) {
-    return 'the daemon default project root'
-  }
-
-  const environmentName = createForm.name.trim() || '<name>'
-  return joinProjectRoot(basePath, environmentName)
+const projectRootPreview = computed(() => {
+  if (form.projectRoot.trim()) return form.projectRoot.trim()
+  const base = props.defaultProjectRootBase.trim()
+  if (!base) return 'daemon default'
+  const name = form.name.trim() || '<name>'
+  return `${base.replace(/\/+$/, '')}/${name}`
 })
 
-watch(
-  selectedPreset,
-  (preset, previousPreset) => {
-    if (!preset?.applicationName) {
-      createForm.applicationVersion = ''
-      return
-    }
-
-    if (preset.name !== previousPreset?.name || !createForm.applicationVersion) {
-      createForm.applicationVersion = preset.defaultAppVersion ?? 'latest'
-    }
-  },
-  { immediate: true },
-)
+watch(selectedPreset, (preset, prev) => {
+  if (!preset?.applicationName) { form.applicationVersion = ''; return }
+  if (preset.name !== prev?.name || !form.applicationVersion) {
+    form.applicationVersion = preset.defaultAppVersion ?? 'latest'
+  }
+}, { immediate: true })
 
 async function handleCreate() {
   isCreating.value = true
-
   try {
-    const response = await createEnvironment(createForm)
-    emit('environment-updated', response.environment)
-
-    const installedApplication = response.environment.application?.name
-      ? ` Installed ${response.environment.application.name}${response.environment.application.version ? ` ${response.environment.application.version}` : ''}.`
+    const res = await createEnvironment(form)
+    emit('environment-updated', res.environment)
+    const app = res.environment.application?.name
+      ? ` ${res.environment.application.name}${res.environment.application.version ? ` ${res.environment.application.version}` : ''} installed.`
       : ''
-
-    emit('notify', {
-      type: 'success',
-      message: `Created ${response.environment.name}.${installedApplication} The Environments tab is ready for lifecycle checks.`,
-    })
-
-    createForm.name = ''
-    createForm.projectRoot = ''
-    createForm.databaseName = ''
-    createForm.force = false
+    emit('notify', { type: 'success', message: `Created ${res.environment.name}.${app}` })
+    form.name = ''
+    form.projectRoot = ''
+    form.databaseName = ''
+    form.force = false
     emit('tab-change', 'environments')
-  } catch (error) {
-    emit('notify', {
-      type: 'error',
-      message: error instanceof Error ? error.message : 'Unable to create environment.',
-    })
+  } catch (e) {
+    emit('notify', { type: 'error', message: e instanceof Error ? e.message : 'Unable to create environment.' })
   } finally {
     isCreating.value = false
   }
 }
-
-function joinProjectRoot(basePath: string, environmentName: string) {
-  const normalizedBasePath = basePath.replace(/\/+$/, '')
-  const normalizedEnvironmentName = environmentName.replace(/^\/+/, '')
-
-  if (!normalizedBasePath) {
-    return normalizedEnvironmentName
-  }
-
-  if (!normalizedEnvironmentName) {
-    return normalizedBasePath
-  }
-
-  return `${normalizedBasePath}/${normalizedEnvironmentName}`
-}
 </script>
 
 <template>
-  <div class="tab-grid tab-grid--create">
-    <section class="surface-panel tab-section">
-      <div class="section-heading mb-4">
-        <p class="eyebrow mb-2">Create environment</p>
-        <h2 class="h3 mb-0">Generate the stack and install the app in one pass</h2>
+  <div class="flex gap-12" style="align-items:start">
+    <!-- Form -->
+    <div class="card flex-1">
+      <div class="card__header">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="8" cy="8" r="6"/>
+          <line x1="8" y1="5" x2="8" y2="11"/>
+          <line x1="5" y1="8" x2="11" y2="8"/>
+        </svg>
+        New environment
       </div>
-
-      <div v-if="selectedPreset" class="preset-summary-card mb-4">
-        <div>
-          <strong>{{ selectedPreset.name }}</strong>
-          <p class="mb-2">{{ selectedPreset.description }}</p>
-        </div>
-        <div class="preset-summary-card__meta">
-          <span>{{ selectedPreset.projectType }}</span>
-          <span>PHP {{ selectedPreset.phpVersion }}</span>
-          <span>{{ selectedPreset.webServer }}</span>
-          <span>{{ selectedPreset.databaseEngine }} {{ selectedPreset.databaseVersion }}</span>
-          <span v-if="selectedPreset.applicationName">{{ selectedPreset.applicationName }} {{ selectedPreset.defaultAppVersion }}</span>
-        </div>
-      </div>
-
-      <form class="form-stack" @submit.prevent="handleCreate">
-        <div class="form-grid form-grid--two">
-          <div>
-            <label class="form-label" for="env-name">Environment name</label>
-            <input id="env-name" v-model.trim="createForm.name" class="form-control form-control-lg" placeholder="wordpress-demo" required />
-          </div>
-
-          <div>
-            <label class="form-label" for="env-preset">Preset</label>
-            <select id="env-preset" v-model="createForm.preset" class="form-select">
-              <option v-for="preset in presets" :key="preset.name" :value="preset.name">
-                {{ preset.name }}
-              </option>
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label class="form-label" for="env-project-root">Project root override</label>
-          <input
-            id="env-project-root"
-            v-model.trim="createForm.projectRoot"
-            class="form-control"
-            :placeholder="defaultProjectRootPreview"
-          />
-          <div class="form-text">Leave blank to create the application in {{ defaultProjectRootPreview }}.</div>
-        </div>
-
-        <div class="form-grid form-grid--two">
-          <div>
-            <label class="form-label" for="env-php">PHP version</label>
-            <select id="env-php" v-model="createForm.phpVersion" class="form-select">
-              <option value="">Preset default</option>
-              <option value="7.4">7.4</option>
-              <option value="8.0">8.0</option>
-              <option value="8.1">8.1</option>
-              <option value="8.2">8.2</option>
-              <option value="8.3">8.3</option>
-              <option value="8.4">8.4</option>
-            </select>
-          </div>
-
-          <div>
-            <label class="form-label" for="env-webserver">Web server</label>
-            <select id="env-webserver" v-model="createForm.webServer" class="form-select">
-              <option value="">Preset default</option>
-              <option value="apache">Apache</option>
-              <option value="nginx">Nginx</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="form-grid form-grid--two">
-          <div>
-            <label class="form-label" for="env-database">Database engine</label>
-            <select id="env-database" v-model="createForm.databaseEngine" class="form-select">
-              <option value="">Preset default</option>
-              <option value="mariadb">MariaDB</option>
-              <option value="mysql">MySQL</option>
-            </select>
-          </div>
-
-          <div v-if="selectedPreset?.applicationName">
-            <label class="form-label" for="env-app-version">{{ selectedPreset.applicationName }} version</label>
-            <input
-              id="env-app-version"
-              v-model.trim="createForm.applicationVersion"
-              class="form-control"
-              :placeholder="selectedPreset.defaultAppVersion || 'latest'"
-            />
-            <div class="form-text">
-              {{ selectedPreset.appVersionHint || `Leave blank to install ${selectedPreset.applicationName} ${selectedPreset.defaultAppVersion || 'latest'}.` }}
+      <div class="card__body">
+        <form class="flex-col gap-10" @submit.prevent="handleCreate">
+          <!-- Name + Preset -->
+          <div class="form-grid form-grid--2">
+            <div class="form-row">
+              <label for="f-name">Name</label>
+              <input id="f-name" v-model.trim="form.name" type="text" placeholder="wordpress-demo" required/>
+            </div>
+            <div class="form-row">
+              <label for="f-preset">Preset</label>
+              <select id="f-preset" v-model="form.preset">
+                <option v-for="p in presets" :key="p.name" :value="p.name">{{ p.name }}</option>
+              </select>
             </div>
           </div>
-        </div>
 
-        <div class="form-grid form-grid--two">
-          <div>
-            <label class="form-label" for="env-db-name">DB name</label>
-            <input id="env-db-name" v-model.trim="createForm.databaseName" class="form-control" placeholder="Optional override" />
+          <!-- Project root -->
+          <div class="form-row">
+            <label for="f-root">Project root override</label>
+            <input id="f-root" v-model.trim="form.projectRoot" type="text" :placeholder="projectRootPreview"/>
           </div>
 
-          <div>
-            <label class="form-label" for="env-db-user">DB user</label>
-            <input id="env-db-user" v-model.trim="createForm.databaseUser" class="form-control" />
+          <!-- PHP + Webserver -->
+          <div class="form-grid form-grid--2">
+            <div class="form-row">
+              <label for="f-php">PHP</label>
+              <select id="f-php" v-model="form.phpVersion">
+                <option value="">Preset default</option>
+                <option value="7.4">7.4</option>
+                <option value="8.0">8.0</option>
+                <option value="8.1">8.1</option>
+                <option value="8.2">8.2</option>
+                <option value="8.3">8.3</option>
+                <option value="8.4">8.4</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="f-web">Web server</label>
+              <select id="f-web" v-model="form.webServer">
+                <option value="">Preset default</option>
+                <option value="apache">Apache</option>
+                <option value="nginx">Nginx</option>
+              </select>
+            </div>
           </div>
-        </div>
 
-        <div class="form-grid form-grid--two">
-          <div>
-            <label class="form-label" for="env-db-password">DB password</label>
-            <input id="env-db-password" v-model="createForm.databasePassword" class="form-control" type="password" />
+          <!-- DB engine + App version -->
+          <div class="form-grid form-grid--2">
+            <div class="form-row">
+              <label for="f-db">Database</label>
+              <select id="f-db" v-model="form.databaseEngine">
+                <option value="">Preset default</option>
+                <option value="mariadb">MariaDB</option>
+                <option value="mysql">MySQL</option>
+              </select>
+            </div>
+            <div v-if="selectedPreset?.applicationName" class="form-row">
+              <label for="f-appver">{{ selectedPreset.applicationName }} version</label>
+              <input id="f-appver" v-model.trim="form.applicationVersion" type="text" :placeholder="selectedPreset.defaultAppVersion || 'latest'"/>
+            </div>
           </div>
 
-          <div>
-            <label class="form-label" for="env-db-root-password">DB root password</label>
-            <input id="env-db-root-password" v-model="createForm.databaseRootPassword" class="form-control" type="password" />
+          <!-- DB credentials -->
+          <div class="form-grid form-grid--2">
+            <div class="form-row">
+              <label for="f-dbname">DB name</label>
+              <input id="f-dbname" v-model.trim="form.databaseName" type="text" placeholder="Optional"/>
+            </div>
+            <div class="form-row">
+              <label for="f-dbuser">DB user</label>
+              <input id="f-dbuser" v-model.trim="form.databaseUser" type="text"/>
+            </div>
           </div>
-        </div>
+          <div class="form-grid form-grid--2">
+            <div class="form-row">
+              <label for="f-dbpass">DB password</label>
+              <input id="f-dbpass" v-model="form.databasePassword" type="password"/>
+            </div>
+            <div class="form-row">
+              <label for="f-dbrootpass">Root password</label>
+              <input id="f-dbrootpass" v-model="form.databaseRootPassword" type="password"/>
+            </div>
+          </div>
 
-        <div class="tool-grid">
-          <label class="tool-toggle">
-            <input v-model="createForm.adminerEnabled" type="checkbox" />
-            <span>Adminer</span>
+          <!-- Tooling toggles -->
+          <div class="tool-toggles">
+            <label class="tool-toggle">
+              <input v-model="form.adminerEnabled" type="checkbox"/>
+              Adminer
+            </label>
+            <label class="tool-toggle">
+              <input v-model="form.mailpitEnabled" type="checkbox"/>
+              Mailpit
+            </label>
+            <label class="tool-toggle">
+              <input v-model="form.xdebugEnabled" type="checkbox"/>
+              Xdebug
+            </label>
+          </div>
+
+          <!-- Force -->
+          <label class="check-label">
+            <input v-model="form.force" type="checkbox"/>
+            Overwrite existing ELK-Local files if present
           </label>
-          <label class="tool-toggle">
-            <input v-model="createForm.mailpitEnabled" type="checkbox" />
-            <span>Mailpit</span>
-          </label>
-          <label class="tool-toggle">
-            <input v-model="createForm.xdebugEnabled" type="checkbox" />
-            <span>Xdebug</span>
-          </label>
-        </div>
 
-        <label class="check-row">
-          <input v-model="createForm.force" type="checkbox" />
-          <span>Overwrite generated ELK-Local files in an existing environment directory if needed.</span>
-        </label>
-
-        <div v-if="isCreating" class="create-progress-panel" aria-live="polite">
-          <div class="create-progress-panel__header">
-            <span class="create-progress-panel__indicator" aria-hidden="true"></span>
+          <!-- Progress -->
+          <div v-if="isCreating" class="progress-panel">
+            <div class="progress-panel__spinner"/>
             <div>
-              <strong>{{ createProgressTitle }}</strong>
-              <p class="micro-copy mb-0">
-                ELK-Local keeps this request open until the environment is generated, containers are ready, and the preset install finishes.
-              </p>
+              <div class="progress-panel__title">Creating {{ form.name || 'environment' }}…</div>
+              <div class="progress-panel__body">Containers are starting, app install in progress.</div>
             </div>
           </div>
 
-          <ol class="create-progress-list mb-0">
-            <li v-for="step in createProgressSteps" :key="step">
-              {{ step }}
-            </li>
-          </ol>
+          <button type="submit" class="btn btn--primary btn--full" :disabled="isCreating">
+            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="8" cy="8" r="6"/>
+              <line x1="8" y1="5" x2="8" y2="11"/>
+              <line x1="5" y1="8" x2="11" y2="8"/>
+            </svg>
+            {{ isCreating ? 'Creating…' : 'Create environment' }}
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Preset info sidebar -->
+    <div class="card" style="width:240px; flex-shrink:0">
+      <div class="card__header">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="8" cy="8" r="6"/>
+          <line x1="8" y1="7" x2="8" y2="12"/>
+          <circle cx="8" cy="5" r="0.5" fill="currentColor"/>
+        </svg>
+        Preset defaults
+      </div>
+      <div v-if="selectedPreset" class="card__body flex-col gap-6">
+        <div style="font-weight:600; font-size:12px">{{ selectedPreset.name }}</div>
+        <div class="text-xs text-muted">{{ selectedPreset.description }}</div>
+        <div class="preset-pill-row">
+          <span class="preset-pill">{{ selectedPreset.projectType }}</span>
+          <span class="preset-pill">PHP {{ selectedPreset.phpVersion }}</span>
+          <span class="preset-pill">{{ selectedPreset.webServer }}</span>
+          <span class="preset-pill">{{ selectedPreset.databaseEngine }} {{ selectedPreset.databaseVersion }}</span>
+          <span v-if="selectedPreset.applicationName" class="preset-pill">
+            {{ selectedPreset.applicationName }} {{ selectedPreset.defaultAppVersion }}
+          </span>
         </div>
-
-        <button type="submit" class="btn btn-dark btn-lg w-100" :disabled="isCreating">
-          {{ isCreating ? 'Creating environment…' : 'Create environment' }}
-        </button>
-      </form>
-    </section>
-
-    <section class="surface-panel tab-section">
-      <div class="section-heading mb-4">
-        <p class="eyebrow mb-2">Workflow notes</p>
-        <h2 class="h3 mb-0">What the create flow does now</h2>
+        <div class="detail-row" style="border:none; padding:0">
+          <span class="detail-row__label">Root</span>
+          <span class="detail-row__value">{{ projectRootPreview }}</span>
+        </div>
       </div>
-
-      <div class="feature-grid feature-grid--single">
-        <article class="feature-card feature-card--accent">
-          <strong>Application install</strong>
-          <span>Installable presets populate the project root rather than leaving you with an empty mounted directory.</span>
-        </article>
-        <article class="feature-card">
-          <strong>Config synchronization</strong>
-          <span>Database credentials are written into the generated manifest, Compose config, and supported app config files.</span>
-        </article>
-        <article class="feature-card">
-          <strong>Version-aware WordPress</strong>
-          <span>Stable, nightly, beta, and RC WordPress builds can be selected directly from this form.</span>
-        </article>
-      </div>
-    </section>
+      <div v-else class="empty-state" style="padding:16px">No preset selected.</div>
+    </div>
   </div>
 </template>

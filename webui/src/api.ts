@@ -183,6 +183,12 @@ export function openEnvironmentInVSCode(name: string) {
   })
 }
 
+export function openEnvironmentFolder(name: string) {
+  return request<EnvironmentResponse>(`/api/environments/${name}/actions/open-folder`, {
+    method: 'POST',
+  })
+}
+
 export function deleteEnvironment(name: string) {
   return request<DeleteEnvironmentResponse>(`/api/environments/${name}`, {
     method: 'DELETE',

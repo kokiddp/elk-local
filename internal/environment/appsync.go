@@ -231,7 +231,7 @@ func syncWordPressConfig(manifest Manifest) (string, error) {
 }
 
 func wordPressSiteURL(manifest Manifest) string {
-	return fmt.Sprintf("http://127.0.0.1:%d", manifest.Network.HTTPPort)
+	return fmt.Sprintf("http://host.docker.internal:%d", manifest.Network.HTTPPort)
 }
 
 func upsertWordPressDefine(contents string, constantName string, value string) string {

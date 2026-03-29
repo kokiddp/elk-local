@@ -732,10 +732,8 @@ services:
 			XDEBUG_MODE: {{ .Manifest.Tooling.Xdebug.Mode }}
 			XDEBUG_CONFIG: {{ printf "%q" .XdebugConfig }}
 			{{- end }}
-		{{- if .Manifest.Tooling.Xdebug.Enabled }}
 		extra_hosts:
 			- "host.docker.internal:host-gateway"
-		{{- end }}
 		container_name: {{ .Manifest.Compose.NamePrefix }}-web
 		depends_on:
 			- db
@@ -817,10 +815,8 @@ services:
 			XDEBUG_CONFIG: {{ printf "%q" .XdebugConfig }}
 			{{- end }}
 		{{- end }}
-		{{- if .Manifest.Tooling.Xdebug.Enabled }}
 		extra_hosts:
 			- "host.docker.internal:host-gateway"
-		{{- end }}
 		{{- if .Manifest.Tooling.Mailpit.Enabled }}
 		depends_on:
 			- mailpit

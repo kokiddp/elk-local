@@ -871,6 +871,14 @@ func (server *Server) runAction(action string, manifest environment.Manifest) (s
 			return "", err
 		}
 		return fmt.Sprintf("Opening %s in VS Code", manifest.Project.Root), nil
+	case "open-folder":
+		if server.explorer == nil {
+			return "", fmt.Errorf("file explorer integration is not configured")
+		}
+		if err := server.explorer.OpenFolder(manifest.Project.Root); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Opening %s in the system file explorer", manifest.Project.Root), nil
 	default:
 		return "", fmt.Errorf("unknown action %q", action)
 	}
