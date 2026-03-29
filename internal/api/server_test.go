@@ -475,7 +475,7 @@ func TestHandleDeleteEnvironmentDestroysContainersFirst(t *testing.T) {
 
 	executor := &fakeComposeExecutor{
 		outputByArgs: map[string]string{
-			"ps --format json": `[{"Name":"elk-ui-delete-running-demo-web","Service":"web","State":"running","Health":"","Publishers":[]}]`,
+			"ps --format json":      `[{"Name":"elk-ui-delete-running-demo-web","Service":"web","State":"running","Health":"","Publishers":[]}]`,
 			"down --remove-orphans": "",
 		},
 		errorByArgs: map[string]error{},
