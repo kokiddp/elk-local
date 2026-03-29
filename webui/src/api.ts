@@ -220,3 +220,69 @@ export function restoreBackup(name: string, payload: RestoreBackupPayload) {
     body: JSON.stringify(payload),
   })
 }
+
+export function deleteManagedBackup(name: string, fileName: string) {
+  return request<BackupActionResponse>(`/api/environments/${name}/backups/${encodeURIComponent(fileName)}`, {
+    method: 'DELETE',
+  })
+}
+
+export function openManagedBackupFolder(name: string, fileName: string) {
+  return request<BackupActionResponse>(`/api/environments/${name}/backups/${encodeURIComponent(fileName)}/actions/open-folder`, {
+    method: 'POST',
+  })
+}
+
+export function downloadManagedBackupUrl(name: string, fileName: string) {
+  return `/api/environments/${name}/backups/${encodeURIComponent(fileName)}/download`
+}
+
+export async function downloadManagedBackup(name: string, fileName: string) {
+  const response = await fetch(downloadManagedBackupUrl(name, fileName), {
+    method: 'GET',
+  })
+
+  const errorPayload = (await response.clone().json().catch(() => ({}))) as { error?: string }
+  if (!response.ok) {
+    throw new Error(errorPayload.error ?? `Request failed with status ${response.status}`)
+  }
+
+  const blob = await response.blob()
+  const objectUrl = window.URL.createObjectURL(blob)
+
+  const downloadLink = document.createElement('a')
+  downloadLink.href = objectUrl
+  downloadLink.download = extractDownloadFileName(response.headers.get('Content-Disposition'), fileName)
+  downloadLink.style.display = 'none'
+
+  document.body.appendChild(downloadLink)
+  downloadLink.click()
+  downloadLink.remove()
+
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(objectUrl)
+  }, 1000)
+}
+
+function extractDownloadFileName(contentDisposition: string | null, fallbackFileName: string) {
+  if (!contentDisposition) {
+    return fallbackFileName
+  }
+
+  const encodedMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (encodedMatch?.[1]) {
+    return decodeURIComponent(encodedMatch[1])
+  }
+
+  const quotedMatch = contentDisposition.match(/filename="([^"]+)"/i)
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1]
+  }
+
+  const plainMatch = contentDisposition.match(/filename=([^;]+)/i)
+  if (plainMatch?.[1]) {
+    return plainMatch[1].trim()
+  }
+
+  return fallbackFileName
+}

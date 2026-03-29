@@ -231,6 +231,67 @@ func TestRestoreResetsDatabaseAndProjectFiles(t *testing.T) {
 	}
 }
 
+func TestResolveManagedArchiveRejectsDirectoryTraversal(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+	created, err := Create(CreateOptions{
+		Name:        "resolve-managed-demo",
+		Preset:      "wordpress",
+		ProjectRoot: projectRoot,
+		Installer:   stubApplicationInstaller{},
+	})
+	if err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+
+	service := NewBackupService(&fakeBackupExecutor{})
+	if _, err := service.ResolveManagedArchive(created.Manifest, "../outside.tar.gz"); err == nil || !strings.Contains(err.Error(), "must not include directory segments") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := service.ResolveManagedArchive(created.Manifest, filepath.Join(created.Manifest.Storage.BackupsPath, "archive.tar.gz")); err == nil || !strings.Contains(err.Error(), "must not be absolute paths") {
+		t.Fatalf("unexpected error for absolute path: %v", err)
+	}
+}
+
+func TestDeleteManagedArchiveRemovesArchive(t *testing.T) {
+	t.Parallel()
+
+	projectRoot := t.TempDir()
+	created, err := Create(CreateOptions{
+		Name:        "delete-managed-demo",
+		Preset:      "wordpress",
+		ProjectRoot: projectRoot,
+		Installer:   stubApplicationInstaller{},
+	})
+	if err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+
+	service := NewBackupService(&fakeBackupExecutor{dumpOutput: "CREATE TABLE demo (id INT);\n"})
+	service.Now = func() time.Time { return time.Date(2026, time.March, 29, 9, 30, 0, 0, time.UTC) }
+
+	artifact, err := service.Backup(created.Manifest, BackupCreateOptions{})
+	if err != nil {
+		t.Fatalf("backup environment: %v", err)
+	}
+
+	resolvedPath, err := service.ResolveManagedArchive(created.Manifest, filepath.Base(artifact.Path))
+	if err != nil {
+		t.Fatalf("resolve managed archive: %v", err)
+	}
+	if resolvedPath != artifact.Path {
+		t.Fatalf("unexpected resolved path: got %s want %s", resolvedPath, artifact.Path)
+	}
+
+	if err := service.DeleteManagedArchive(created.Manifest, filepath.Base(artifact.Path)); err != nil {
+		t.Fatalf("delete managed archive: %v", err)
+	}
+	if _, err := os.Stat(artifact.Path); !os.IsNotExist(err) {
+		t.Fatalf("expected managed archive to be removed, stat err=%v", err)
+	}
+}
+
 func TestDatabaseScriptsSupportMySQLAndMariaDBTools(t *testing.T) {
 	t.Parallel()
 

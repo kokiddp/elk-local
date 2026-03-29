@@ -261,6 +261,23 @@ func (service BackupService) List(manifest Manifest) ([]BackupInventoryItem, err
 	return items, nil
 }
 
+func (service BackupService) ResolveManagedArchive(manifest Manifest, archiveName string) (string, error) {
+	return resolveManagedBackupArchivePath(manifest, archiveName)
+}
+
+func (service BackupService) DeleteManagedArchive(manifest Manifest, archiveName string) error {
+	resolvedArchivePath, err := resolveManagedBackupArchivePath(manifest, archiveName)
+	if err != nil {
+		return err
+	}
+
+	if err := os.Remove(resolvedArchivePath); err != nil {
+		return fmt.Errorf("delete managed backup archive: %w", err)
+	}
+
+	return nil
+}
+
 func (service BackupService) ensureDatabaseReady(manifest Manifest) error {
 	if _, err := service.Executor.Run(manifest.Compose.File, "up", "-d", "db"); err != nil {
 		return err
@@ -732,6 +749,32 @@ func resolveExistingBackupArchivePath(manifest Manifest, archivePath string) (st
 	managedPath := filepath.Join(manifest.Storage.BackupsPath, trimmedPath)
 	if _, err := os.Stat(managedPath); err != nil {
 		return "", fmt.Errorf("inspect backup archive: %w", err)
+	}
+
+	return filepath.Clean(managedPath), nil
+}
+
+func resolveManagedBackupArchivePath(manifest Manifest, archiveName string) (string, error) {
+	trimmedName := strings.TrimSpace(archiveName)
+	if trimmedName == "" {
+		return "", fmt.Errorf("backup file name is required")
+	}
+	if filepath.IsAbs(trimmedName) {
+		return "", fmt.Errorf("managed backup file names must not be absolute paths")
+	}
+
+	cleanName := filepath.Clean(trimmedName)
+	if cleanName == "." || cleanName == ".." || cleanName != filepath.Base(cleanName) {
+		return "", fmt.Errorf("managed backup file names must not include directory segments")
+	}
+
+	managedPath := filepath.Join(manifest.Storage.BackupsPath, cleanName)
+	info, err := os.Stat(managedPath)
+	if err != nil {
+		return "", fmt.Errorf("inspect managed backup archive: %w", err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("managed backup archive %s is a directory", cleanName)
 	}
 
 	return filepath.Clean(managedPath), nil

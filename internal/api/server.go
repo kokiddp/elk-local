@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -32,6 +33,7 @@ type Server struct {
 	staticDir   string
 	installer   environment.ApplicationInstaller
 	editor      folderOpener
+	explorer    folderOpener
 	httpServer  *http.Server
 	serverMu    sync.RWMutex
 }
@@ -251,6 +253,7 @@ func NewServer(projectRoot string, staticDir string, executor environment.Compos
 		staticDir:   resolvedStaticDir,
 		installer:   installer,
 		editor:      integration.VSCodeOpener{},
+		explorer:    integration.SystemFolderOpener{},
 	}, nil
 }
 
@@ -619,14 +622,33 @@ func (server *Server) handleBackups(writer http.ResponseWriter, request *http.Re
 		return
 	}
 
-	if len(tail) != 1 || request.Method != http.MethodPost {
-		writeMethodNotAllowed(writer, http.MethodGet, http.MethodPost)
+	if len(tail) == 1 && request.Method == http.MethodDelete {
+		server.handleManagedBackupDelete(writer, manifest, tail[0])
 		return
 	}
 
-	backupsBefore, err := server.listBackups(manifest)
-	if err != nil {
-		writeError(writer, http.StatusInternalServerError, err)
+	if len(tail) == 2 && tail[1] == "download" {
+		if request.Method != http.MethodGet {
+			writeMethodNotAllowed(writer, http.MethodGet)
+			return
+		}
+
+		server.handleManagedBackupDownload(writer, request, manifest, tail[0])
+		return
+	}
+
+	if len(tail) == 3 && tail[1] == "actions" && tail[2] == "open-folder" {
+		if request.Method != http.MethodPost {
+			writeMethodNotAllowed(writer, http.MethodPost)
+			return
+		}
+
+		server.handleManagedBackupOpenFolder(writer, manifest, tail[0])
+		return
+	}
+
+	if len(tail) != 1 || request.Method != http.MethodPost {
+		writeMethodNotAllowed(writer, http.MethodGet, http.MethodPost, http.MethodDelete)
 		return
 	}
 
@@ -705,6 +727,12 @@ func (server *Server) handleBackups(writer http.ResponseWriter, request *http.Re
 			Message:         "Backup imported into managed inventory",
 		})
 	case "restore":
+		backupsBefore, err := server.listBackups(manifest)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, err)
+			return
+		}
+
 		var payload restoreBackupRequest
 		if err := decodeJSON(request, &payload); err != nil {
 			writeError(writer, http.StatusBadRequest, err)
@@ -743,6 +771,94 @@ func (server *Server) handleBackups(writer http.ResponseWriter, request *http.Re
 	default:
 		writeMethodNotAllowed(writer, http.MethodGet, http.MethodPost)
 	}
+}
+
+func (server *Server) handleManagedBackupDelete(writer http.ResponseWriter, manifest environment.Manifest, encodedArchiveName string) {
+	archiveName, err := decodeBackupPathSegment(encodedArchiveName)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, err)
+		return
+	}
+
+	backupView, err := server.lookupManagedBackup(manifest, archiveName)
+	if err != nil {
+		writeManagedBackupError(writer, err)
+		return
+	}
+
+	if err := server.backup.DeleteManagedArchive(manifest, archiveName); err != nil {
+		writeManagedBackupError(writer, err)
+		return
+	}
+
+	backupsAfter, err := server.listBackups(manifest)
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, backupActionResponse{
+		EnvironmentName: manifest.Name,
+		Backup:          backupView,
+		Backups:         backupsAfter,
+		Message:         "Managed backup deleted",
+	})
+}
+
+func (server *Server) handleManagedBackupDownload(writer http.ResponseWriter, request *http.Request, manifest environment.Manifest, encodedArchiveName string) {
+	archiveName, err := decodeBackupPathSegment(encodedArchiveName)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, err)
+		return
+	}
+
+	archivePath, err := server.backup.ResolveManagedArchive(manifest, archiveName)
+	if err != nil {
+		writeManagedBackupError(writer, err)
+		return
+	}
+
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(archivePath)))
+	writer.Header().Set("Content-Type", "application/gzip")
+	http.ServeFile(writer, request, archivePath)
+}
+
+func (server *Server) handleManagedBackupOpenFolder(writer http.ResponseWriter, manifest environment.Manifest, encodedArchiveName string) {
+	archiveName, err := decodeBackupPathSegment(encodedArchiveName)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, err)
+		return
+	}
+
+	backupView, err := server.lookupManagedBackup(manifest, archiveName)
+	if err != nil {
+		writeManagedBackupError(writer, err)
+		return
+	}
+
+	archivePath, err := server.backup.ResolveManagedArchive(manifest, archiveName)
+	if err != nil {
+		writeManagedBackupError(writer, err)
+		return
+	}
+
+	if server.explorer == nil {
+		writeError(writer, http.StatusInternalServerError, fmt.Errorf("file explorer integration is not configured"))
+		return
+	}
+
+	folderPath := filepath.Dir(archivePath)
+	if err := server.explorer.OpenFolder(folderPath); err != nil {
+		writeError(writer, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, backupActionResponse{
+		EnvironmentName: manifest.Name,
+		Backup:          backupView,
+		Message:         fmt.Sprintf("Opening %s in the system file explorer", folderPath),
+	})
 }
 
 func (server *Server) runAction(action string, manifest environment.Manifest) (string, error) {
@@ -871,6 +987,48 @@ func (server *Server) listBackups(manifest environment.Manifest) ([]BackupView, 
 	}
 
 	return views, nil
+}
+
+func (server *Server) lookupManagedBackup(manifest environment.Manifest, archiveName string) (BackupView, error) {
+	backups, err := server.listBackups(manifest)
+	if err != nil {
+		return BackupView{}, err
+	}
+
+	for _, backup := range backups {
+		if backup.FileName == archiveName {
+			return backup, nil
+		}
+	}
+
+	if _, err := server.backup.ResolveManagedArchive(manifest, archiveName); err != nil {
+		return BackupView{}, err
+	}
+
+	return BackupView{}, fmt.Errorf("managed backup archive %s not found", archiveName)
+}
+
+func decodeBackupPathSegment(segment string) (string, error) {
+	decodedSegment, err := url.PathUnescape(segment)
+	if err != nil {
+		return "", fmt.Errorf("decode backup file name: %w", err)
+	}
+
+	trimmedSegment := strings.TrimSpace(decodedSegment)
+	if trimmedSegment == "" {
+		return "", fmt.Errorf("backup file name is required")
+	}
+
+	return trimmedSegment, nil
+}
+
+func writeManagedBackupError(writer http.ResponseWriter, err error) {
+	statusCode := http.StatusBadRequest
+	if errors.Is(err, os.ErrNotExist) {
+		statusCode = http.StatusNotFound
+	}
+
+	writeError(writer, statusCode, err)
 }
 
 func toBackupViewFromArtifact(artifact environment.BackupArtifact) (BackupView, error) {

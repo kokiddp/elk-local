@@ -213,6 +213,8 @@ WordPress preset images now install WP-CLI inside the PHP container. Installed E
 
 The Environments detail pane now includes an `Open in VS Code` action. On WSL, ELK-Local prefers the WSL `code` command so the project opens in the remote WSL workspace when that integration is available.
 
+The Backups tab now uses the same inventory-and-detail model as the rest of the dashboard. You can browse one environment’s managed archives, inspect a selected snapshot, download it directly, open its containing folder in the host file explorer, delete it from the managed inventory, and still run create, export, import, and restore flows from the same screen.
+
 Use `go run ./cmd/elk-local daemon status` to verify the control plane is up, `go run ./cmd/elk-local daemon stop` to shut it down, and `go run ./cmd/elk-local serve` only when you explicitly want a foreground/debug session.
 
 ## Testing
@@ -248,9 +250,9 @@ When you are validating installed behavior after source edits, use the full inst
 ## Roadmap
 
 1. Add rebuild and clone commands on top of the lifecycle layer.
-2. Add backup inventory, pruning, and richer restore inspection.
+2. Add backup pruning and richer restore inspection.
 3. Add richer environment inspection and health details.
-4. Expand the dashboard with switch and backup operations.
+4. Expand the dashboard with switch operations and deeper backup insights.
 
 ## Documentation
 

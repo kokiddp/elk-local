@@ -1,6 +1,6 @@
 # Backup Workflows
 
-ELK-Local now has a first-phase CLI workflow for backup, export, import, and restore.
+ELK-Local supports backup, export, import, and restore from both the CLI and the local dashboard.
 
 ## Commands
 
@@ -28,6 +28,7 @@ Backup and export both produce the same portable `.tar.gz` format:
 - `export` writes the same archive format to a path you choose.
 - `import` copies a portable archive into the environment's managed `backups/` directory.
 - `restore` resolves either a direct archive path or a file name inside the managed `backups/` directory.
+- The dashboard lists managed archives per environment and can download, open the containing folder, restore, or delete a selected managed archive directly.
 
 ## Safety Notes
 
@@ -37,6 +38,5 @@ Backup and export both produce the same portable `.tar.gz` format:
 
 ## Current Limits
 
-- Backup inventory, pruning, and listing are not implemented yet.
-- The dashboard does not expose backup actions yet.
 - Restore currently targets the configured database for the selected environment; it does not recreate or retarget environments automatically.
+- Delete only removes the managed archive file from the environment inventory. It does not touch exported copies stored elsewhere.

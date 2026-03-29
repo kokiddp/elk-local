@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -604,6 +605,150 @@ func TestHandleBackupCreateCreatesManagedArchive(t *testing.T) {
 	}
 	if payload.Backup.DatabaseName != "ui_backup_create_demo" {
 		t.Fatalf("unexpected database name in backup response: %s", payload.Backup.DatabaseName)
+	}
+}
+
+func TestHandleBackupDownloadServesManagedArchive(t *testing.T) {
+	isolateUserHome(t)
+
+	projectRoot := t.TempDir()
+	created, err := environment.Create(environment.CreateOptions{
+		Name:        "ui-backup-download-demo",
+		Preset:      "wordpress",
+		ProjectRoot: projectRoot,
+		Installer:   fakeApplicationInstaller{},
+	})
+	if err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+
+	service := environment.NewBackupService(&fakeComposeExecutor{})
+	service.Now = func() time.Time { return time.Date(2026, time.March, 29, 10, 0, 0, 0, time.UTC) }
+	artifact, err := service.Backup(created.Manifest, environment.BackupCreateOptions{IncludeProjectFiles: true})
+	if err != nil {
+		t.Fatalf("create managed backup: %v", err)
+	}
+
+	server, err := NewServer(projectRoot, "", &fakeComposeExecutor{}, fakeApplicationInstaller{})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/environments/ui-backup-download-demo/backups/"+url.PathEscape(filepath.Base(artifact.Path))+"/download", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Header().Get("Content-Disposition"), filepath.Base(artifact.Path)) {
+		t.Fatalf("unexpected content disposition: %s", response.Header().Get("Content-Disposition"))
+	}
+
+	expectedContents, err := os.ReadFile(artifact.Path)
+	if err != nil {
+		t.Fatalf("read managed backup: %v", err)
+	}
+	if response.Body.String() != string(expectedContents) {
+		t.Fatal("download response body did not match the managed archive")
+	}
+}
+
+func TestHandleBackupOpenFolderUsesSystemExplorer(t *testing.T) {
+	isolateUserHome(t)
+
+	projectRoot := t.TempDir()
+	created, err := environment.Create(environment.CreateOptions{
+		Name:        "ui-backup-open-folder-demo",
+		Preset:      "wordpress",
+		ProjectRoot: projectRoot,
+		Installer:   fakeApplicationInstaller{},
+	})
+	if err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+
+	service := environment.NewBackupService(&fakeComposeExecutor{})
+	service.Now = func() time.Time { return time.Date(2026, time.March, 29, 11, 0, 0, 0, time.UTC) }
+	artifact, err := service.Backup(created.Manifest, environment.BackupCreateOptions{})
+	if err != nil {
+		t.Fatalf("create managed backup: %v", err)
+	}
+
+	server, err := NewServer(projectRoot, "", &fakeComposeExecutor{}, fakeApplicationInstaller{})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	opener := &fakeFolderOpener{}
+	server.explorer = opener
+
+	request := httptest.NewRequest(http.MethodPost, "/api/environments/ui-backup-open-folder-demo/backups/"+url.PathEscape(filepath.Base(artifact.Path))+"/actions/open-folder", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d body=%s", response.Code, response.Body.String())
+	}
+	if opener.openedPath != created.Manifest.Storage.BackupsPath {
+		t.Fatalf("unexpected opened path: got %s want %s", opener.openedPath, created.Manifest.Storage.BackupsPath)
+	}
+
+	var payload backupActionResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Backup.FileName != filepath.Base(artifact.Path) {
+		t.Fatalf("unexpected backup payload: %+v", payload)
+	}
+}
+
+func TestHandleBackupDeleteRemovesManagedArchive(t *testing.T) {
+	isolateUserHome(t)
+
+	projectRoot := t.TempDir()
+	created, err := environment.Create(environment.CreateOptions{
+		Name:        "ui-backup-delete-demo",
+		Preset:      "wordpress",
+		ProjectRoot: projectRoot,
+		Installer:   fakeApplicationInstaller{},
+	})
+	if err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+
+	service := environment.NewBackupService(&fakeComposeExecutor{})
+	service.Now = func() time.Time { return time.Date(2026, time.March, 29, 12, 0, 0, 0, time.UTC) }
+	artifact, err := service.Backup(created.Manifest, environment.BackupCreateOptions{})
+	if err != nil {
+		t.Fatalf("create managed backup: %v", err)
+	}
+
+	server, err := NewServer(projectRoot, "", &fakeComposeExecutor{}, fakeApplicationInstaller{})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodDelete, "/api/environments/ui-backup-delete-demo/backups/"+url.PathEscape(filepath.Base(artifact.Path)), nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d body=%s", response.Code, response.Body.String())
+	}
+
+	var payload backupActionResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Backup.FileName != filepath.Base(artifact.Path) {
+		t.Fatalf("unexpected deleted backup payload: %+v", payload)
+	}
+	if len(payload.Backups) != 0 {
+		t.Fatalf("expected empty inventory after delete, got %+v", payload.Backups)
+	}
+	if _, err := os.Stat(artifact.Path); !os.IsNotExist(err) {
+		t.Fatalf("expected managed archive to be removed, stat err=%v", err)
 	}
 }
 
