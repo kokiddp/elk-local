@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { deleteEnvironment, runEnvironmentAction, type EnvironmentView } from '../api'
+import { deleteEnvironment, openEnvironmentInVSCode, runEnvironmentAction, type EnvironmentView } from '../api'
 import { environmentStateSummary, formatUpdatedAt, statusLabel, statusTone, toolingSummary } from '../lib/display'
 
 const props = defineProps<{
@@ -13,7 +13,7 @@ const emit = defineEmits<{
   notify: [payload: { type: 'success' | 'error'; message: string }]
 }>()
 
-const pendingAction = ref<'start' | 'stop' | 'destroy' | 'delete' | ''>('')
+const pendingAction = ref<'start' | 'stop' | 'destroy' | 'delete' | 'open-editor' | ''>('')
 const hasContainers = computed(() => props.environment.status.containers.length > 0)
 const canDelete = computed(() => props.environment.status.state === 'stopped' && !hasContainers.value)
 
@@ -106,6 +106,26 @@ async function handleDelete() {
     pendingAction.value = ''
   }
 }
+
+async function handleOpenInVSCode() {
+  pendingAction.value = 'open-editor'
+
+  try {
+    const response = await openEnvironmentInVSCode(props.environment.name)
+    emit('environment-updated', response.environment)
+    emit('notify', {
+      type: 'success',
+      message: response.output || `${props.environment.name} opened in VS Code.`,
+    })
+  } catch (error) {
+    emit('notify', {
+      type: 'error',
+      message: error instanceof Error ? error.message : `Unable to open ${props.environment.name} in VS Code.`,
+    })
+  } finally {
+    pendingAction.value = ''
+  }
+}
 </script>
 
 <template>
@@ -131,6 +151,9 @@ async function handleDelete() {
       </div>
 
       <div class="action-stack">
+        <button type="button" class="btn btn-outline-secondary" :disabled="Boolean(pendingAction)" @click="handleOpenInVSCode">
+          {{ pendingAction === 'open-editor' ? 'Opening…' : 'Open in VS Code' }}
+        </button>
         <button type="button" class="btn btn-dark" :disabled="isActionDisabled('start')" @click="handleAction('start')">
           {{ pendingAction === 'start' ? 'Starting…' : 'Start' }}
         </button>

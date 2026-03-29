@@ -75,6 +75,10 @@ func TestCreateWritesApacheEnvironmentArtifacts(t *testing.T) {
 		t.Fatalf("PHP Dockerfile does not include required WordPress extensions: %s", phpDockerfileText)
 	}
 
+	if !strings.Contains(phpDockerfileText, "wp-cli.phar") || !strings.Contains(phpDockerfileText, "/usr/local/bin/wp") {
+		t.Fatalf("PHP Dockerfile does not install WP-CLI for WordPress environments: %s", phpDockerfileText)
+	}
+
 	if !strings.Contains(phpDockerfileText, "CMD [\"apache2-foreground\"]") {
 		t.Fatalf("PHP Dockerfile does not preserve the apache runtime command: %s", phpDockerfileText)
 	}
@@ -362,8 +366,19 @@ func TestCreateCanEnableOptionalTooling(t *testing.T) {
 		t.Fatalf("read xdebug ini: %v", err)
 	}
 
-	if !strings.Contains(string(xdebugINIContents), "xdebug.client_port=9003") {
+	xdebugPortText := strconv.Itoa(created.Manifest.Tooling.Xdebug.ClientPort)
+	if !strings.Contains(string(xdebugINIContents), "xdebug.client_port="+xdebugPortText) {
 		t.Fatalf("unexpected xdebug ini: %s", string(xdebugINIContents))
+	}
+	if !strings.Contains(string(xdebugINIContents), "xdebug.discover_client_host=1") {
+		t.Fatalf("expected xdebug ini to enable client discovery for web requests: %s", string(xdebugINIContents))
+	}
+	if !strings.Contains(string(xdebugINIContents), "xdebug.client_discovery_header=REMOTE_ADDR") {
+		t.Fatalf("expected xdebug ini to pin client discovery to REMOTE_ADDR: %s", string(xdebugINIContents))
+	}
+
+	if strings.Contains(string(xdebugINIContents), "zend_extension=xdebug") {
+		t.Fatalf("expected xdebug ini to avoid re-declaring the extension: %s", string(xdebugINIContents))
 	}
 
 	launchContents, err := os.ReadFile(filepath.Join(projectRoot, ".vscode", "launch.json"))
@@ -372,12 +387,19 @@ func TestCreateCanEnableOptionalTooling(t *testing.T) {
 	}
 
 	launchText := string(launchContents)
-	if !strings.Contains(launchText, "Listen for Xdebug 3.0 (Local)") || !strings.Contains(launchText, "\"port\": 9003") {
+	if !strings.Contains(launchText, "Listen for Xdebug 3.0 (Local)") || !strings.Contains(launchText, "\"port\": "+xdebugPortText) {
 		t.Fatalf("expected VS Code launch config for Xdebug 3: %s", launchText)
+	}
+	if !strings.Contains(launchText, "\"hostname\": \"0.0.0.0\"") {
+		t.Fatalf("expected VS Code launch config to listen on an explicit IPv4 host: %s", launchText)
 	}
 
 	if !strings.Contains(launchText, "Launch currently open script") {
 		t.Fatalf("expected VS Code launch config to include launch script entry: %s", launchText)
+	}
+
+	if !strings.Contains(launchText, "\"/var/www/html\": \"${workspaceFolder}\"") {
+		t.Fatalf("expected VS Code launch config to include Xdebug path mappings: %s", launchText)
 	}
 
 	adminerIndexContents, err := os.ReadFile(filepath.Join(created.AdminerDirPath, "index.php"))

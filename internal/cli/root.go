@@ -28,6 +28,7 @@ func newRootCommand() *cobra.Command {
 	command.AddCommand(newVersionCommand())
 	command.AddCommand(newDaemonCommand())
 	command.AddCommand(newServeCommand())
+	command.AddCommand(newProxyCommand())
 
 	return command
 }

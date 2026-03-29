@@ -41,6 +41,7 @@ func Update(options UpdateOptions) (*CreatedEnvironment, error) {
 	if err != nil {
 		return nil, err
 	}
+	previousManifest := manifest
 
 	if options.EnableAdminer && options.DisableAdminer {
 		return nil, fmt.Errorf("adminer cannot be enabled and disabled in the same command")
@@ -109,6 +110,9 @@ func Update(options UpdateOptions) (*CreatedEnvironment, error) {
 	manifest.Runtime.WebServer = strings.ToLower(manifest.Runtime.WebServer)
 	manifest.Runtime.Database.Engine = strings.ToLower(manifest.Runtime.Database.Engine)
 	normalizeManifest(&manifest)
+	if err := assignUpdatePorts(&manifest, previousManifest, options); err != nil {
+		return nil, err
+	}
 
 	if err := ValidateManifest(manifest); err != nil {
 		return nil, err

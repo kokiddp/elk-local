@@ -11,6 +11,7 @@ service_name="elk-local.service"
 service_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 service_path="$service_dir/$service_name"
 service_wrapper_path="$bin_dir/elk-local-daemon-service"
+tool_proxy_wrapper_path="$bin_dir/elk-local-tool-proxy"
 default_environments_dir="${HOME}/elk-local/environments"
 default_backups_dir="${HOME}/elk-local/backups"
 default_webui_port="4173"
@@ -184,6 +185,22 @@ EOF
   chmod +x "$service_wrapper_path"
 }
 
+write_tool_proxy_wrappers() {
+  cat >"$tool_proxy_wrapper_path" <<EOF
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+tool_name="\$(basename "\$0")"
+exec "${bin_dir}/elk-local" proxy "\$tool_name" "\$@"
+EOF
+  chmod +x "$tool_proxy_wrapper_path"
+
+  for tool_name in wp mysql mariadb mysqldump mariadb-dump; do
+    ln -sf "$tool_proxy_wrapper_path" "$bin_dir/$tool_name"
+  done
+}
+
 write_systemd_service() {
   mkdir -p "$service_dir"
   cat >"$service_path" <<EOF
@@ -271,6 +288,7 @@ copy_payload() {
 
   cp "$source_binary" "$bin_dir/elk-local"
   chmod +x "$bin_dir/elk-local"
+  write_tool_proxy_wrappers
 
   rm -rf "$webui_dist_dir"
   cp -R "$source_webui_dist" "$webui_dist_dir"

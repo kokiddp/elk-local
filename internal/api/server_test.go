@@ -25,6 +25,16 @@ type fakeComposeExecutor struct {
 
 type fakeApplicationInstaller struct{}
 
+type fakeFolderOpener struct {
+	openedPath string
+	err        error
+}
+
+func (opener *fakeFolderOpener) OpenFolder(path string) error {
+	opener.openedPath = path
+	return opener.err
+}
+
 func (fakeApplicationInstaller) Install(request environment.ApplicationInstallRequest) (environment.InstalledApplication, error) {
 	if !request.Preset.InstallsApplication() {
 		return environment.InstalledApplication{}, nil
@@ -338,6 +348,52 @@ func TestHandleEnvironmentActionRunsLifecycle(t *testing.T) {
 
 	if payload.Environment.Status.State != "running" {
 		t.Fatalf("unexpected environment state: %s", payload.Environment.Status.State)
+	}
+}
+
+func TestHandleEnvironmentOpenEditorUsesVSCodeOpener(t *testing.T) {
+	isolateUserHome(t)
+
+	projectRoot := t.TempDir()
+	created, err := environment.Create(environment.CreateOptions{
+		Name:        "ui-open-editor-demo",
+		Preset:      "wordpress",
+		ProjectRoot: projectRoot,
+		Installer:   fakeApplicationInstaller{},
+	})
+	if err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+
+	executor := &fakeComposeExecutor{
+		outputByArgs: map[string]string{"ps --format json": "[]"},
+		errorByArgs:  map[string]error{},
+	}
+	server, err := NewServer(projectRoot, "", executor, fakeApplicationInstaller{})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	opener := &fakeFolderOpener{}
+	server.editor = opener
+
+	request := httptest.NewRequest(http.MethodPost, "/api/environments/ui-open-editor-demo/actions/open-editor", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status code: %d body=%s", response.Code, response.Body.String())
+	}
+	if opener.openedPath != created.Manifest.Project.Root {
+		t.Fatalf("unexpected opened path: %s", opener.openedPath)
+	}
+
+	var payload environmentResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.Contains(payload.Output, "Opening ") {
+		t.Fatalf("expected output message, got %q", payload.Output)
 	}
 }
 

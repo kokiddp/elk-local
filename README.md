@@ -205,7 +205,13 @@ Generated WordPress stacks now keep the local URL and container runtime aligned:
 
 The Environments tab now uses a simple list-and-detail layout instead of a wall of cards. Selecting a stack opens a single detail pane with its state, runtime controls, links, and container inventory, and a destroyed environment can now be deleted from the dashboard once no containers are still reported.
 
-When Xdebug is enabled for a stack, ELK-Local now writes `.vscode/launch.json` into the app root with ready-to-run PHP debug listeners for ports `9003` and `9000`, so VS Code can attach without manual setup.
+ELK-Local now verifies host TCP ports before it writes them into a stack manifest. Auto-assigned HTTP, database, Adminer, Mailpit, and Xdebug ports skip blocked host ports instead of failing later at `docker compose up`, while explicit port overrides still fail fast if the requested port is unavailable.
+
+When Xdebug is enabled for a stack, ELK-Local writes `.vscode/launch.json` into the app root with ready-to-run PHP debug listeners that follow the stack's actual Xdebug client port and include the `/var/www/html` to `${workspaceFolder}` path mapping needed for container breakpoints to bind in VS Code.
+
+WordPress preset images now install WP-CLI inside the PHP container. Installed ELK-Local setups also place `wp`, `mysql`, `mariadb`, `mysqldump`, and `mariadb-dump` wrappers on your PATH; when you run them from inside an ELK-managed project root they proxy into the matching containers, which keeps Wordmove workflows usable from a terminal opened in the webroot.
+
+The Environments detail pane now includes an `Open in VS Code` action. On WSL, ELK-Local prefers the WSL `code` command so the project opens in the remote WSL workspace when that integration is available.
 
 Use `go run ./cmd/elk-local daemon status` to verify the control plane is up, `go run ./cmd/elk-local daemon stop` to shut it down, and `go run ./cmd/elk-local serve` only when you explicitly want a foreground/debug session.
 

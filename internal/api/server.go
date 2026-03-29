@@ -18,7 +18,12 @@ import (
 
 	"elk-local/internal/config"
 	"elk-local/internal/environment"
+	"elk-local/internal/integration"
 )
+
+type folderOpener interface {
+	OpenFolder(path string) error
+}
 
 type Server struct {
 	projectRoot string
@@ -26,6 +31,7 @@ type Server struct {
 	backup      environment.BackupService
 	staticDir   string
 	installer   environment.ApplicationInstaller
+	editor      folderOpener
 	httpServer  *http.Server
 	serverMu    sync.RWMutex
 }
@@ -244,6 +250,7 @@ func NewServer(projectRoot string, staticDir string, executor environment.Compos
 		backup:      environment.NewBackupService(executor),
 		staticDir:   resolvedStaticDir,
 		installer:   installer,
+		editor:      integration.VSCodeOpener{},
 	}, nil
 }
 
@@ -746,6 +753,14 @@ func (server *Server) runAction(action string, manifest environment.Manifest) (s
 		return server.lifecycle.Stop(manifest)
 	case "destroy":
 		return server.lifecycle.Destroy(manifest)
+	case "open-editor":
+		if server.editor == nil {
+			return "", fmt.Errorf("VS Code integration is not configured")
+		}
+		if err := server.editor.OpenFolder(manifest.Project.Root); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Opening %s in VS Code", manifest.Project.Root), nil
 	default:
 		return "", fmt.Errorf("unknown action %q", action)
 	}

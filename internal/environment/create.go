@@ -143,6 +143,9 @@ func Create(options CreateOptions) (*CreatedEnvironment, error) {
 	manifest.Runtime.WebServer = strings.ToLower(manifest.Runtime.WebServer)
 	manifest.Runtime.Database.Engine = strings.ToLower(manifest.Runtime.Database.Engine)
 	normalizeManifest(&manifest)
+	if err := assignCreatePorts(&manifest, options); err != nil {
+		return nil, err
+	}
 
 	if err := ValidateManifest(manifest); err != nil {
 		return nil, err
@@ -842,10 +845,15 @@ COPY docker-entrypoint.sh /usr/local/bin/elk-local-php-entrypoint
 RUN set -eux; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends \
+		curl \
 		ghostscript \
 		unzip \
 		zip; \
 	rm -rf /var/lib/apt/lists/*; \
+	{{- if eq .Manifest.Preset "wordpress" }}
+	curl -fsSL -o /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar; \
+	chmod +x /usr/local/bin/wp; \
+	{{- end }}
 	chmod +x /usr/local/bin/elk-local-php-entrypoint; \
 	install-php-extensions \
 		curl \
@@ -988,9 +996,10 @@ function adminer_object() {
 include './adminer.php';
 `
 
-const xdebugINIConfigTemplate = `zend_extension=xdebug
-xdebug.mode={{ .Manifest.Tooling.Xdebug.Mode }}
+const xdebugINIConfigTemplate = `xdebug.mode={{ .Manifest.Tooling.Xdebug.Mode }}
 xdebug.start_with_request=yes
+xdebug.discover_client_host=1
+xdebug.client_discovery_header=REMOTE_ADDR
 xdebug.client_host={{ .Manifest.Tooling.Xdebug.ClientHost }}
 xdebug.client_port={{ .Manifest.Tooling.Xdebug.ClientPort }}
 xdebug.idekey={{ .Manifest.Tooling.Xdebug.IDEKey }}

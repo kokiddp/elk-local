@@ -177,6 +177,12 @@ export function runEnvironmentAction(name: string, action: 'start' | 'stop' | 'd
   })
 }
 
+export function openEnvironmentInVSCode(name: string) {
+  return request<EnvironmentResponse>(`/api/environments/${name}/actions/open-editor`, {
+    method: 'POST',
+  })
+}
+
 export function deleteEnvironment(name: string) {
   return request<DeleteEnvironmentResponse>(`/api/environments/${name}`, {
     method: 'DELETE',

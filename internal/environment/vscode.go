@@ -17,20 +17,20 @@ var managedVSCodeLaunchConfigNames = map[string]struct{}{
 }
 
 type vscodeLaunchFile struct {
-	Version        string                   `json:"version"`
-	Configurations []map[string]any         `json:"configurations"`
+	Version        string           `json:"version"`
+	Configurations []map[string]any `json:"configurations"`
 }
 
 func syncVSCodeLaunchConfig(manifest Manifest) error {
 	launchPath := filepath.Join(manifest.Project.Root, ".vscode", "launch.json")
 	if manifest.Tooling.Xdebug.Enabled {
-		return writeVSCodeLaunchConfig(launchPath)
+		return writeVSCodeLaunchConfig(launchPath, manifest)
 	}
 
 	return pruneVSCodeLaunchConfig(launchPath)
 }
 
-func writeVSCodeLaunchConfig(launchPath string) error {
+func writeVSCodeLaunchConfig(launchPath string, manifest Manifest) error {
 	launchFile, err := readVSCodeLaunchConfig(launchPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -40,7 +40,7 @@ func writeVSCodeLaunchConfig(launchPath string) error {
 	}
 
 	launchFile.Version = firstNonEmpty(launchFile.Version, vscodeLaunchVersion)
-	launchFile.Configurations = append(removeManagedVSCodeLaunchConfigs(launchFile.Configurations), managedVSCodeLaunchConfigs()...)
+	launchFile.Configurations = append(removeManagedVSCodeLaunchConfigs(launchFile.Configurations), managedVSCodeLaunchConfigs(manifest)...)
 
 	contents, err := json.MarshalIndent(launchFile, "", "\t")
 	if err != nil {
@@ -127,13 +127,18 @@ func removeManagedVSCodeLaunchConfigs(configurations []map[string]any) []map[str
 	return remaining
 }
 
-func managedVSCodeLaunchConfigs() []map[string]any {
+func managedVSCodeLaunchConfigs(manifest Manifest) []map[string]any {
+	xdebugPort := preferredPort(manifest.Tooling.Xdebug.ClientPort, DefaultXdebugClientPort())
+	pathMappings := map[string]string{"/var/www/html": "${workspaceFolder}"}
+
 	return []map[string]any{
 		{
-			"name":    "Listen for Xdebug 3.0 (Local)",
-			"type":    "php",
-			"request": "launch",
-			"port":    9003,
+			"name":         "Listen for Xdebug 3.0 (Local)",
+			"type":         "php",
+			"request":      "launch",
+			"hostname":     "0.0.0.0",
+			"port":         xdebugPort,
+			"pathMappings": pathMappings,
 			"xdebugSettings": map[string]any{
 				"max_children": 128,
 				"max_data":     1024,
@@ -142,10 +147,12 @@ func managedVSCodeLaunchConfigs() []map[string]any {
 			},
 		},
 		{
-			"name":    "Listen for Xdebug (Local)",
-			"type":    "php",
-			"request": "launch",
-			"port":    9000,
+			"name":         "Listen for Xdebug (Local)",
+			"type":         "php",
+			"request":      "launch",
+			"hostname":     "0.0.0.0",
+			"port":         9000,
+			"pathMappings": pathMappings,
 			"xdebugSettings": map[string]any{
 				"max_children": 128,
 				"max_data":     1024,
@@ -154,12 +161,14 @@ func managedVSCodeLaunchConfigs() []map[string]any {
 			},
 		},
 		{
-			"name":    "Launch currently open script",
-			"type":    "php",
-			"request": "launch",
-			"program": "${file}",
-			"cwd":     "${fileDirname}",
-			"port":    9000,
+			"name":         "Launch currently open script",
+			"type":         "php",
+			"request":      "launch",
+			"program":      "${file}",
+			"cwd":          "${fileDirname}",
+			"hostname":     "0.0.0.0",
+			"port":         xdebugPort,
+			"pathMappings": pathMappings,
 			"xdebugSettings": map[string]any{
 				"max_children": 128,
 				"max_data":     1024,

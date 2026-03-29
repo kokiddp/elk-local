@@ -39,7 +39,7 @@ func TestSyncVSCodeLaunchConfigPreservesCustomConfigurations(t *testing.T) {
 		t.Fatalf("write existing launch.json: %v", err)
 	}
 
-	manifest := Manifest{Project: Project{Root: projectRoot}, Tooling: Tooling{Xdebug: Xdebug{Enabled: true}}}
+	manifest := Manifest{Project: Project{Root: projectRoot}, Tooling: Tooling{Xdebug: Xdebug{Enabled: true, ClientPort: 9103}}}
 	if err := syncVSCodeLaunchConfig(manifest); err != nil {
 		t.Fatalf("sync launch config: %v", err)
 	}
@@ -56,8 +56,14 @@ func TestSyncVSCodeLaunchConfigPreservesCustomConfigurations(t *testing.T) {
 	if strings.Contains(text, "\"port\": 9999") {
 		t.Fatalf("expected managed launch config to be replaced with ELK default ports: %s", text)
 	}
-	if !strings.Contains(text, "Listen for Xdebug 3.0 (Local)") || !strings.Contains(text, "\"port\": 9003") {
+	if !strings.Contains(text, "Listen for Xdebug 3.0 (Local)") || !strings.Contains(text, "\"port\": 9103") {
 		t.Fatalf("expected managed Xdebug launch config to be present: %s", text)
+	}
+	if !strings.Contains(text, "\"hostname\": \"0.0.0.0\"") {
+		t.Fatalf("expected managed Xdebug launch config to listen on explicit IPv4 host: %s", text)
+	}
+	if !strings.Contains(text, "\"/var/www/html\": \"${workspaceFolder}\"") {
+		t.Fatalf("expected managed Xdebug launch config to include path mappings: %s", text)
 	}
 
 	manifest.Tooling.Xdebug.Enabled = false
