@@ -201,6 +201,8 @@ The dashboard create form follows the same project-root default as the CLI. On i
 
 While a create request is running, the dashboard now keeps an explicit in-flight status panel visible in the Create tab instead of only changing the button label. Runtime action notices in the Environments tab also stay concise and no longer echo the full raw Compose output into the success banner.
 
+Generated WordPress stacks now keep the local URL and container runtime aligned: `wp-config.php` pins `WP_HOME` and `WP_SITEURL` to the local `127.0.0.1:<port>` address, Apache listens on that same port inside the container, and filesystem updates use the direct method instead of falling back to FTP for the default local setup.
+
 Use `go run ./cmd/elk-local daemon status` to verify the control plane is up, `go run ./cmd/elk-local daemon stop` to shut it down, and `go run ./cmd/elk-local serve` only when you explicitly want a foreground/debug session.
 
 ## Testing

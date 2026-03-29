@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -220,6 +221,11 @@ func writeGeneratedArtifacts(manifest Manifest) (*CreatedEnvironment, error) {
 	phpDockerfilePath := filepath.Join(phpDir, "Dockerfile")
 	if err := os.WriteFile(phpDockerfilePath, []byte(rendered.PHPDockerfile), 0o644); err != nil {
 		return nil, fmt.Errorf("write PHP Dockerfile: %w", err)
+	}
+
+	phpEntrypointPath := filepath.Join(phpDir, "docker-entrypoint.sh")
+	if err := os.WriteFile(phpEntrypointPath, []byte(rendered.PHPEntrypoint), 0o755); err != nil {
+		return nil, fmt.Errorf("write PHP entrypoint: %w", err)
 	}
 
 	if rendered.NginxConfig != "" {
@@ -456,6 +462,7 @@ type renderedArtifacts struct {
 	Compose           string
 	NginxConfig       string
 	PHPDockerfile     string
+	PHPEntrypoint     string
 	AdminerDockerfile string
 	AdminerIndexPHP   string
 	XdebugINI         string
@@ -478,6 +485,7 @@ func renderArtifacts(manifest Manifest) (renderedArtifacts, error) {
 		WebImage:            webImage(manifest.Runtime),
 		AppImage:            appImage(manifest.Runtime),
 	}
+	templateData.HostUID, templateData.HostGID = currentHostIdentity()
 
 	composeTemplateText := apacheComposeTemplate
 	nginxTemplateText := ""
@@ -496,7 +504,12 @@ func renderArtifacts(manifest Manifest) (renderedArtifacts, error) {
 		return renderedArtifacts{}, fmt.Errorf("render PHP Dockerfile: %w", err)
 	}
 
-	rendered := renderedArtifacts{Compose: composeContents, PHPDockerfile: phpDockerfileContents}
+	phpEntrypointContents, err := executeTemplate(phpEntrypointTemplate, templateData)
+	if err != nil {
+		return renderedArtifacts{}, fmt.Errorf("render PHP entrypoint: %w", err)
+	}
+
+	rendered := renderedArtifacts{Compose: composeContents, PHPDockerfile: phpDockerfileContents, PHPEntrypoint: phpEntrypointContents}
 
 	if nginxTemplateText != "" {
 		nginxContents, err := executeTemplate(nginxTemplateText, templateData)
@@ -549,6 +562,8 @@ type composeTemplateData struct {
 	UsesNginx           bool
 	WebImage            string
 	AppImage            string
+	HostUID             string
+	HostGID             string
 }
 
 func executeTemplate(templateText string, data composeTemplateData) (string, error) {
@@ -601,6 +616,19 @@ func appImage(runtime Runtime) string {
 	return ""
 }
 
+func currentHostIdentity() (string, string) {
+	currentUser, err := user.Current()
+	if err != nil {
+		return "", ""
+	}
+
+	if !numericID(currentUser.Uid) || !numericID(currentUser.Gid) {
+		return "", ""
+	}
+
+	return currentUser.Uid, currentUser.Gid
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -636,10 +664,19 @@ services:
 			dockerfile: Dockerfile
 			args:
 				BASE_IMAGE: {{ .WebImage }}
-		{{- if .Manifest.Tooling.Xdebug.Enabled }}
 		environment:
+			ELK_HTTP_PORT: {{ printf "%q" (printf "%d" .Manifest.Network.HTTPPort) }}
+			{{- if .HostUID }}
+			ELK_HOST_UID: {{ printf "%q" .HostUID }}
+			{{- end }}
+			{{- if .HostGID }}
+			ELK_HOST_GID: {{ printf "%q" .HostGID }}
+			{{- end }}
+			{{- if .Manifest.Tooling.Xdebug.Enabled }}
 			XDEBUG_MODE: {{ .Manifest.Tooling.Xdebug.Mode }}
 			XDEBUG_CONFIG: {{ printf "%q" .XdebugConfig }}
+			{{- end }}
+		{{- if .Manifest.Tooling.Xdebug.Enabled }}
 		extra_hosts:
 			- "host.docker.internal:host-gateway"
 		{{- end }}
@@ -647,7 +684,7 @@ services:
 		depends_on:
 			- db
 		ports:
-			- "{{ .Manifest.Network.HTTPPort }}:80"
+			- "{{ .Manifest.Network.HTTPPort }}:{{ .Manifest.Network.HTTPPort }}"
 		volumes:
 			- {{ printf "%q" (printf "%s:/var/www/html" .ProjectRootForYAML) }}
 	db:
@@ -700,10 +737,20 @@ services:
 			dockerfile: Dockerfile
 			args:
 				BASE_IMAGE: {{ .AppImage }}
-		{{- if .Manifest.Tooling.Xdebug.Enabled }}
+		{{- if or .HostUID .HostGID .Manifest.Tooling.Xdebug.Enabled }}
 		environment:
+			{{- if .HostUID }}
+			ELK_HOST_UID: {{ printf "%q" .HostUID }}
+			{{- end }}
+			{{- if .HostGID }}
+			ELK_HOST_GID: {{ printf "%q" .HostGID }}
+			{{- end }}
+			{{- if .Manifest.Tooling.Xdebug.Enabled }}
 			XDEBUG_MODE: {{ .Manifest.Tooling.Xdebug.Mode }}
 			XDEBUG_CONFIG: {{ printf "%q" .XdebugConfig }}
+			{{- end }}
+		{{- end }}
+		{{- if .Manifest.Tooling.Xdebug.Enabled }}
 		extra_hosts:
 			- "host.docker.internal:host-gateway"
 		{{- end }}
@@ -786,6 +833,7 @@ FROM mlocati/php-extension-installer:2 AS php_extension_installer
 FROM ${BASE_IMAGE}
 
 COPY --from=php_extension_installer /usr/bin/install-php-extensions /usr/local/bin/
+COPY docker-entrypoint.sh /usr/local/bin/elk-local-php-entrypoint
 
 RUN set -eux; \
 	apt-get update; \
@@ -794,6 +842,7 @@ RUN set -eux; \
 		unzip \
 		zip; \
 	rm -rf /var/lib/apt/lists/*; \
+	chmod +x /usr/local/bin/elk-local-php-entrypoint; \
 	install-php-extensions \
 		curl \
 		dom \
@@ -812,9 +861,61 @@ RUN set -eux; \
 		zip{{ if .Manifest.Tooling.Xdebug.Enabled }} \
 		xdebug{{ end }}
 
+ENTRYPOINT ["elk-local-php-entrypoint"]
+CMD [{{ if .UsesApache }}"apache2-foreground"{{ else }}"php-fpm"{{ end }}]
+
 {{- if .Manifest.Tooling.Xdebug.Enabled }}
 COPY xdebug.ini /usr/local/etc/php/conf.d/zz-elk-xdebug.ini
 {{- end }}
+`
+
+const phpEntrypointTemplate = `#!/usr/bin/env bash
+
+set -euo pipefail
+
+remap_www_data() {
+	if [[ "$(id -u)" -ne 0 ]]; then
+		return
+	fi
+
+	local host_uid="${ELK_HOST_UID:-}"
+	local host_gid="${ELK_HOST_GID:-}"
+	if [[ ! "$host_uid" =~ ^[0-9]+$ ]] || [[ ! "$host_gid" =~ ^[0-9]+$ ]]; then
+		return
+	fi
+
+	if [[ "$(id -g www-data)" != "$host_gid" ]]; then
+		groupmod -o -g "$host_gid" www-data
+	fi
+
+	if [[ "$(id -u www-data)" != "$host_uid" ]]; then
+		usermod -o -u "$host_uid" -g "$host_gid" www-data
+	fi
+
+	chown -R www-data:www-data /var/run/apache2 /var/lock/apache2 /var/log/apache2 /var/run/php 2>/dev/null || true
+}
+
+configure_apache_port() {
+	if [[ "$#" -eq 0 ]] || [[ "$1" != "apache2-foreground" ]]; then
+		return
+	fi
+
+	local http_port="${ELK_HTTP_PORT:-}"
+	if [[ ! "$http_port" =~ ^[0-9]+$ ]]; then
+		return
+	fi
+
+	sed -ri "s/Listen 80/Listen ${http_port}/g" /etc/apache2/ports.conf
+	sed -ri "s/<VirtualHost \*:80>/<VirtualHost *:${http_port}>/g" /etc/apache2/sites-available/000-default.conf
+}
+
+main() {
+	remap_www_data
+	configure_apache_port "$@"
+	exec docker-php-entrypoint "$@"
+}
+
+main "$@"
 `
 
 const adminerDockerfileTemplate = `FROM adminer:5.4.2-standalone

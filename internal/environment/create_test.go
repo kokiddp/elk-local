@@ -3,6 +3,8 @@ package environment
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -73,12 +75,33 @@ func TestCreateWritesApacheEnvironmentArtifacts(t *testing.T) {
 		t.Fatalf("PHP Dockerfile does not include required WordPress extensions: %s", phpDockerfileText)
 	}
 
+	if !strings.Contains(phpDockerfileText, "CMD [\"apache2-foreground\"]") {
+		t.Fatalf("PHP Dockerfile does not preserve the apache runtime command: %s", phpDockerfileText)
+	}
+
 	if strings.Contains(composeText, "\t") {
 		t.Fatalf("compose file should not contain tabs: %q", composeText)
 	}
 
 	if !strings.Contains(composeText, "container_name: elk-wp-demo-web") {
 		t.Fatalf("compose does not use derived container names: %s", composeText)
+	}
+
+	portText := strconv.Itoa(created.Manifest.Network.HTTPPort)
+	if !strings.Contains(composeText, "\""+portText+":"+portText+"\"") {
+		t.Fatalf("compose does not mirror the apache port inside the container: %s", composeText)
+	}
+
+	if !strings.Contains(composeText, "ELK_HTTP_PORT: \""+portText+"\"") {
+		t.Fatalf("compose does not expose the apache listen port to the container: %s", composeText)
+	}
+
+	hostUID, hostGID := currentHostIdentity()
+	if runtime.GOOS != "windows" && hostUID != "" && !strings.Contains(composeText, "ELK_HOST_UID: \""+hostUID+"\"") {
+		t.Fatalf("compose does not pass the host uid to the php container: %s", composeText)
+	}
+	if runtime.GOOS != "windows" && hostGID != "" && !strings.Contains(composeText, "ELK_HOST_GID: \""+hostGID+"\"") {
+		t.Fatalf("compose does not pass the host gid to the php container: %s", composeText)
 	}
 
 	if created.NginxConfigPath != "" {
@@ -92,6 +115,31 @@ func TestCreateWritesApacheEnvironmentArtifacts(t *testing.T) {
 
 	if !strings.Contains(string(configContents), "define('DB_NAME', 'wp_demo');") {
 		t.Fatalf("wp-config does not include database name: %s", string(configContents))
+	}
+
+	if !strings.Contains(string(configContents), "define('WP_HOME', 'http://127.0.0.1:"+portText+"');") {
+		t.Fatalf("wp-config does not include WP_HOME for the local stack url: %s", string(configContents))
+	}
+
+	if !strings.Contains(string(configContents), "define('WP_SITEURL', 'http://127.0.0.1:"+portText+"');") {
+		t.Fatalf("wp-config does not include WP_SITEURL for the local stack url: %s", string(configContents))
+	}
+
+	if !strings.Contains(string(configContents), "define('FS_METHOD', 'direct');") {
+		t.Fatalf("wp-config does not force direct local filesystem writes: %s", string(configContents))
+	}
+
+	entrypointContents, err := os.ReadFile(filepath.Join(phpBuildContext, "docker-entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read PHP entrypoint: %v", err)
+	}
+
+	if !strings.Contains(string(entrypointContents), "configure_apache_port") {
+		t.Fatalf("PHP entrypoint does not configure the apache listen port: %s", string(entrypointContents))
+	}
+
+	if !strings.Contains(string(entrypointContents), "exec docker-php-entrypoint \"$@\"") {
+		t.Fatalf("PHP entrypoint does not delegate to docker-php-entrypoint: %s", string(entrypointContents))
 	}
 }
 
@@ -129,6 +177,15 @@ func TestCreateWritesNginxEnvironmentArtifacts(t *testing.T) {
 	phpBuildContext := filepath.Join(created.Manifest.Storage.BasePath, "php")
 	if !strings.Contains(composeText, "context: \""+phpBuildContext+"\"") {
 		t.Fatalf("compose does not use the PHP build context: %s", composeText)
+	}
+
+	phpDockerfileContents, err := os.ReadFile(filepath.Join(phpBuildContext, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("read PHP Dockerfile: %v", err)
+	}
+
+	if !strings.Contains(string(phpDockerfileContents), "CMD [\"php-fpm\"]") {
+		t.Fatalf("nginx preset should preserve the php-fpm runtime command: %s", string(phpDockerfileContents))
 	}
 
 	if !strings.Contains(composeText, "nginx:1.27-alpine") {
@@ -290,6 +347,14 @@ func TestCreateCanEnableOptionalTooling(t *testing.T) {
 	phpDockerfileText := string(phpDockerfileContents)
 	if !strings.Contains(phpDockerfileText, "install-php-extensions") || !strings.Contains(phpDockerfileText, "imagick") || !strings.Contains(phpDockerfileText, "xdebug") {
 		t.Fatalf("expected PHP Dockerfile to install imagick and xdebug: %s", phpDockerfileText)
+	}
+
+	if !strings.Contains(phpDockerfileText, "ENTRYPOINT [\"elk-local-php-entrypoint\"]") {
+		t.Fatalf("expected PHP Dockerfile to use the generated entrypoint: %s", phpDockerfileText)
+	}
+
+	if !strings.Contains(phpDockerfileText, "CMD [\"php-fpm\"]") {
+		t.Fatalf("expected PHP Dockerfile to preserve the php-fpm runtime command: %s", phpDockerfileText)
 	}
 
 	xdebugINIContents, err := os.ReadFile(filepath.Join(created.XdebugDirPath, "xdebug.ini"))

@@ -214,6 +214,9 @@ func syncWordPressConfig(manifest Manifest) (string, error) {
 	configText = upsertWordPressDefine(configText, "DB_USER", manifest.Runtime.Database.User)
 	configText = upsertWordPressDefine(configText, "DB_PASSWORD", manifest.Runtime.Database.Password)
 	configText = upsertWordPressDefine(configText, "DB_HOST", databaseServiceHost())
+	configText = upsertWordPressDefine(configText, "WP_HOME", wordPressSiteURL(manifest))
+	configText = upsertWordPressDefine(configText, "WP_SITEURL", wordPressSiteURL(manifest))
+	configText = upsertWordPressDefine(configText, "FS_METHOD", "direct")
 
 	if !strings.Contains(configText, "wp-settings.php") {
 		configText = strings.TrimRight(configText, "\n") + "\n\nif (!defined('ABSPATH')) {\n    define('ABSPATH', __DIR__ . '/');\n}\n\nrequire_once ABSPATH . 'wp-settings.php';\n"
@@ -224,6 +227,10 @@ func syncWordPressConfig(manifest Manifest) (string, error) {
 	}
 
 	return configPath, nil
+}
+
+func wordPressSiteURL(manifest Manifest) string {
+	return fmt.Sprintf("http://127.0.0.1:%d", manifest.Network.HTTPPort)
 }
 
 func upsertWordPressDefine(contents string, constantName string, value string) string {
