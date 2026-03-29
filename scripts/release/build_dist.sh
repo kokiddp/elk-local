@@ -7,7 +7,7 @@ out_dir="${OUT_DIR:-$repo_root/dist/releases}"
 version="${VERSION:-}"
 commit="${COMMIT:-}"
 build_date="${DATE:-}"
-targets="${TARGETS:-linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64}"
+targets="${TARGETS:-linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64}"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then

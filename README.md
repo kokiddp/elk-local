@@ -235,7 +235,7 @@ make test-all
 GitHub Actions now covers two delivery paths:
 
 - `Test On Master` runs on every push to `master` and executes the existing local validation matrix with `make test-all`.
-- `Release` runs on `v*` tags or through manual dispatch, builds the Vue production assets, cross-compiles the CLI, stamps version metadata into the binary, and uploads distribution archives plus `sha256sum.txt`.
+- `Release` runs on `v*` tag pushes or through manual dispatch, builds the Vue production assets, cross-compiles the CLI for `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64`, and `windows/arm64`, stamps version metadata into the binary, and opens a draft GitHub release containing the distribution archives and `sha256sum.txt` for review before publishing.
 
 For a local release dry run, use:
 

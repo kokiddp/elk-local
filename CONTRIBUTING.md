@@ -41,7 +41,7 @@ This currently covers Go tests, the Vue production build, and the daemon smoke t
 make dist
 ```
 
-This mirrors the GitHub `Release` workflow by rebuilding `webui/dist`, cross-compiling the CLI for the supported desktop targets, and writing ready-to-distribute archives plus checksums under `dist/releases/`. The release payload now also includes `install.sh`, which installs into `${HOME}/.elk-local` and writes the installed defaults file used by the CLI, including the configured environment roots, backups root, daemon auto-start preference, and default web UI port.
+This mirrors the GitHub `Release` workflow by rebuilding `webui/dist`, cross-compiling the CLI for `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64`, and `windows/arm64`, and writing ready-to-distribute archives plus checksums under `dist/releases/`. The release payload now also includes `install.sh`, which installs into `${HOME}/.elk-local` and writes the installed defaults file used by the CLI, including the configured environment roots, backups root, daemon auto-start preference, and default web UI port.
 
 When a change needs installed-path validation, do not stop at local source runs. After making edits, run the installed loop in order: `./install.sh --uninstall`, `make dist`, and then install the freshly generated payload again. This is the required path for checking installer behavior, packaged web UI assets, and daemon/runtime behavior as actually shipped.
 
