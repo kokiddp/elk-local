@@ -459,7 +459,7 @@ func TestHandleDeleteEnvironmentRemovesManagedFiles(t *testing.T) {
 	}
 }
 
-func TestHandleDeleteEnvironmentRejectsActiveContainers(t *testing.T) {
+func TestHandleDeleteEnvironmentDestroysContainersFirst(t *testing.T) {
 	isolateUserHome(t)
 
 	projectRoot := t.TempDir()
@@ -476,6 +476,7 @@ func TestHandleDeleteEnvironmentRejectsActiveContainers(t *testing.T) {
 	executor := &fakeComposeExecutor{
 		outputByArgs: map[string]string{
 			"ps --format json": `[{"Name":"elk-ui-delete-running-demo-web","Service":"web","State":"running","Health":"","Publishers":[]}]`,
+			"down --remove-orphans": "",
 		},
 		errorByArgs: map[string]error{},
 	}
@@ -489,7 +490,7 @@ func TestHandleDeleteEnvironmentRejectsActiveContainers(t *testing.T) {
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 
-	if response.Code != http.StatusConflict {
+	if response.Code != http.StatusOK {
 		t.Fatalf("unexpected status code: %d body=%s", response.Code, response.Body.String())
 	}
 }

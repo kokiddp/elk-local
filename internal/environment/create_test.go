@@ -256,6 +256,10 @@ func TestCreateUsesPublicDocumentRootForLaravel(t *testing.T) {
 	if !strings.Contains(envText, "DB_HOST=\"db\"") || !strings.Contains(envText, "DB_DATABASE=\"laravel_demo\"") {
 		t.Fatalf("laravel env was not synced: %s", envText)
 	}
+
+	if !strings.Contains(envText, "SESSION_DRIVER=\"file\"") {
+		t.Fatalf("laravel env should set SESSION_DRIVER=file to avoid missing sessions table: %s", envText)
+	}
 }
 
 func TestCreateApacheVhostForLaravelWithApache(t *testing.T) {

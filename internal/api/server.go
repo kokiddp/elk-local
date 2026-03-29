@@ -549,14 +549,8 @@ func (server *Server) handleEnvironment(writer http.ResponseWriter, request *htt
 
 			writeJSON(writer, http.StatusOK, environmentResponse{Environment: environmentView})
 		case http.MethodDelete:
-			environmentView, err := server.inspectManifest(manifest)
-			if err != nil {
-				writeError(writer, http.StatusInternalServerError, err)
-				return
-			}
-
-			if len(environmentView.Status.Containers) > 0 {
-				writeError(writer, http.StatusConflict, fmt.Errorf("destroy %s before deleting it; %d container(s) are still present", manifest.Name, len(environmentView.Status.Containers)))
+			if _, err := server.lifecycle.Destroy(manifest); err != nil {
+				writeError(writer, http.StatusInternalServerError, fmt.Errorf("destroy containers: %w", err))
 				return
 			}
 

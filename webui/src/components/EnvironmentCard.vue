@@ -13,10 +13,9 @@ const emit = defineEmits<{
   notify: [payload: { type: 'success' | 'error'; message: string }]
 }>()
 
-const pendingAction = ref<'start' | 'stop' | 'destroy' | 'delete' | 'open-editor' | ''>('')
+const pendingAction = ref<'start' | 'stop' | 'remove' | 'open-editor' | ''>('')
 
 const hasContainers = computed(() => props.environment.status.containers.length > 0)
-const canDelete = computed(() => props.environment.status.state === 'stopped' && !hasContainers.value)
 const publishedPortCount = computed(() => {
   return props.environment.status.containers.reduce((total, container) => total + (container.publishedPorts?.length ?? 0), 0)
 })
@@ -77,14 +76,6 @@ const xdebugSummary = computed(() => {
   return `Listen with the managed VS Code config on ${props.environment.tooling.xdebug.clientPort}.`
 })
 
-const deleteHint = computed(() => {
-  if (canDelete.value) {
-    return 'This stack is fully stopped and can be removed permanently.'
-  }
-
-  return 'Destroy containers first to unlock permanent delete.'
-})
-
 function environmentTone(state: string) {
   switch (state) {
     case 'running':
@@ -114,7 +105,7 @@ function containerLabel(container: EnvironmentView['status']['containers'][numbe
   return container.health || container.state
 }
 
-function isActionDisabled(action: 'start' | 'stop' | 'destroy') {
+function isActionDisabled(action: 'start' | 'stop') {
   if (pendingAction.value) {
     return true
   }
@@ -126,14 +117,12 @@ function isActionDisabled(action: 'start' | 'stop' | 'destroy') {
   return !hasContainers.value
 }
 
-function successMessage(action: 'start' | 'stop' | 'destroy', environment: EnvironmentView) {
+function successMessage(action: 'start' | 'stop', environment: EnvironmentView) {
   switch (action) {
     case 'start':
       return `${environment.name} is running. Open the app link when the container status looks healthy.`
     case 'stop':
       return `${environment.name} is stopped.`
-    case 'destroy':
-      return `${environment.name} containers were removed.`
   }
 }
 
@@ -149,7 +138,7 @@ function deleteMessage(name: string, removedProjectFiles?: boolean, removedBacku
   return `${name} was deleted: ${fragments.join(', ')}.`
 }
 
-async function handleAction(action: 'start' | 'stop' | 'destroy') {
+async function handleAction(action: 'start' | 'stop') {
   pendingAction.value = action
 
   try {
@@ -169,23 +158,15 @@ async function handleAction(action: 'start' | 'stop' | 'destroy') {
   }
 }
 
-async function handleDelete() {
-  if (!canDelete.value) {
-    emit('notify', {
-      type: 'error',
-      message: `Destroy ${props.environment.name} before deleting it from the dashboard.`,
-    })
-    return
-  }
-
+async function handleRemove() {
   const confirmed = window.confirm(
-    `Delete ${props.environment.name}? Managed runtime files will be removed immediately. Managed project files are only removed when this environment lives in the default managed directory.`,
+    `Remove ${props.environment.name}? Running containers will be stopped and removed, then all environment files will be deleted. Managed project files are only removed when this environment lives in the default managed directory.`,
   )
   if (!confirmed) {
     return
   }
 
-  pendingAction.value = 'delete'
+  pendingAction.value = 'remove'
 
   try {
     const response = await deleteEnvironment(props.environment.name)
@@ -197,7 +178,7 @@ async function handleDelete() {
   } catch (error) {
     emit('notify', {
       type: 'error',
-      message: error instanceof Error ? error.message : `Unable to delete ${props.environment.name}.`,
+      message: error instanceof Error ? error.message : `Unable to remove ${props.environment.name}.`,
     })
   } finally {
     pendingAction.value = ''
@@ -271,22 +252,15 @@ async function handleOpenInVSCode() {
         </div>
 
         <div class="action-cluster action-cluster--danger">
-          <button type="button" class="btn btn-outline-danger" :disabled="isActionDisabled('destroy')" @click="handleAction('destroy')">
-            {{ pendingAction === 'destroy' ? 'Destroying…' : 'Destroy' }}
-          </button>
-          <button type="button" class="btn btn-danger" :disabled="Boolean(pendingAction) || !canDelete" @click="handleDelete">
-            {{ pendingAction === 'delete' ? 'Deleting…' : 'Delete' }}
+          <button type="button" class="btn btn-danger" :disabled="Boolean(pendingAction)" @click="handleRemove">
+            {{ pendingAction === 'remove' ? 'Removing…' : 'Remove' }}
           </button>
         </div>
 
         <p class="micro-copy environment-card__hint mb-0">
-          {{ deleteHint }} Open in VS Code targets the project root shown below.
+          Remove stops and deletes all containers and environment files. Open in VS Code targets the project root shown below.
         </p>
       </div>
-    </div>
-
-    <div v-if="!canDelete" class="alert alert-secondary mb-0 py-2">
-      Destroy the stack before permanent delete becomes available.
     </div>
 
     <div class="service-grid">

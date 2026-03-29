@@ -71,6 +71,7 @@ func laravelEnvSettings(manifest Manifest) []envSetting {
 		{Key: "DB_DATABASE", Value: manifest.Runtime.Database.Name},
 		{Key: "DB_USERNAME", Value: manifest.Runtime.Database.User},
 		{Key: "DB_PASSWORD", Value: manifest.Runtime.Database.Password},
+		{Key: "SESSION_DRIVER", Value: "file"},
 	}
 }
 
